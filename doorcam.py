@@ -6,15 +6,17 @@ import time
 DEFAULT_INDEX=0
 DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
 DEFAULT_RESOLUTION=(1920,1080)
+DEFAULT_MAX_FPS=20
 
 class Camera():
 
-    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, fourcc=DEFAULT_FOURCC, convert_rgb:bool = False):
+    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC, convert_rgb:bool = False):
         self.index = index
         self.resolution = resolution
         self.rotation = rotation
         self.fourcc = fourcc
         self.frame_count = 0
+        self.max_fps = max_fps
         self.fps = 0
         if convert_rgb:
             self.convert_rbg = 0
@@ -28,9 +30,17 @@ class Camera():
         self.fps_thread.start()
 
     def capture_loop(self):
+        checkpoint = time.time()
+        interval = 1.0/self.max_fps
         while True:
-            self.current_frame = self.read()
+            frame = self.read()
+            now = time.time()
+            while(now - checkpoint < interval):
+                time.sleep(0.001)
+                now = time.time()
+            self.current_frame = frame
             self.frame_count += 1
+            checkpoint = now
     
     def fps_loop(self):
         checkpoint = time.time()
@@ -41,7 +51,7 @@ class Camera():
                 self.frame_count = 0
                 checkpoint = now
             else:
-                time.sleep(0.01)
+                time.sleep(0.001)
 
     def get_current_frame(self):
         if self.rotation != None:
