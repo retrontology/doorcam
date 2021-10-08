@@ -38,9 +38,9 @@ def backlight_set(flag: bool, dev=BACKLIGHT_DEVICE):
         backlight.write(out)
 
 def play(image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2BGR565)
         image = cv2.rotate(image, SCREEN_ROTATION)
         image = cv2.resize(image, SCREEN_RESOLUTION)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2BGR565)
         fb_write(image.tobytes())
 
 def main():
