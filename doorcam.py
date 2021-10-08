@@ -1,54 +1,50 @@
 import cv2
 import numpy as np
-from threading import Thread
 
-SCREEN_ROTATION=cv2.ROTATE_90_CLOCKWISE
-SCREEN_RESOLUTION=(480, 800)
-SCREEN_DTYPE = np.uint16
-CAPTURE_RESOLUTION=(1920, 1080)
-FRAMEBUFFER_DEVICE='/dev/fb0'
-BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
-CAMERA_INDEX=0
+DEFAULT_INDEX=0
+DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+DEFAULT_RESOLUTION=(1920,1080)
 
-def init_capture(index=CAMERA_INDEX, resolution=CAPTURE_RESOLUTION):
-    cap = cv2.VideoCapture(index)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-    cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1]) 
-    return cap
+class Camera():
 
-def fb_blank(data = 0, dev=FRAMEBUFFER_DEVICE):
-    blank = np.array([[data]], dtype=SCREEN_DTYPE)
-    blank = np.repeat(blank, SCREEN_RESOLUTION[0], 1)
-    blank = np.repeat(blank, SCREEN_RESOLUTION[1], 0)
-    print(blank.shape)
-    fb_write(blank.tobytes(), dev)
+    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, fourcc=DEFAULT_FOURCC, convert_rgb:bool = False):
+        self.index = index
+        self.resolution = resolution
+        self.rotation = rotation
+        self.fourcc = fourcc
+        if convert_rgb:
+            self.convert_rbg = 0
+        else:
+            self.convert_rbg = 1
+        self.open()
+    
+    def open(self):
+        self.cap = cv2.VideoCapture(self.index)
+        self.cap.set(cv2.CAP_PROP_FOURCC, self.fourcc)
+        self.cap.set(cv2.CAP_PROP_CONVERT_RGB, self.convert_rbg)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1]) 
+        return self.cap
+    
+    def close(self):
+        self.cap.release()
+    
+    def read(self):
+        ret, image = self.cap.read()
+        if ret:
+            if self.rotation != None:
+                image = cv2.rotate(image, self.rotation)
+                if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
+                    image = cv2.resize(image, (self.resolution[1], self.resolution[0]))
+            return image
+        else:
+            if self.cap.isOpened():
+                raise CameraReadWhileClosed
+            else:
+                raise CameraReadError
 
-def fb_write(data, dev=FRAMEBUFFER_DEVICE):
-    with open(dev, 'wb') as fb:
-        fb.write(data)
+class CameraReadError(Exception):
+    pass
 
-def backlight_set(flag: bool, dev=BACKLIGHT_DEVICE):
-    if flag:
-        out = b'0'
-    else:
-        out = b'1'
-    with open(dev, 'wb') as backlight:
-        backlight.write(out)
-
-def play(image):
-        image = cv2.rotate(image, SCREEN_ROTATION)
-        image = cv2.resize(image, SCREEN_RESOLUTION)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2BGR565)
-        fb_write(image.tobytes())
-
-def main():
-    vid = init_capture(CAMERA_INDEX, CAPTURE_RESOLUTION)
-    while True:
-        ret, src = vid.read()
-        Thread(target=play, args=(src,)).start()
-        
-
-if __name__ == '__main__':
-    main()
+class CameraReadWhileClosed(CameraReadError):
+    pass
