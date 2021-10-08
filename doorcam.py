@@ -15,6 +15,7 @@ class Camera():
         self.rotation = rotation
         self.fourcc = fourcc
         self.frame_count = 0
+        self.fps = 0
         if convert_rgb:
             self.convert_rbg = 0
         else:
