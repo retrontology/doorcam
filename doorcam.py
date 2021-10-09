@@ -33,7 +33,11 @@ class Camera():
         checkpoint = time.time()
         interval = 1.0/self.max_fps
         while True:
-            frame = self.read()
+            frame = None
+            try:
+                frame = self.read()
+            except Exception as e:
+                print(e)
             now = time.time()
             while(now - checkpoint < interval):
                 time.sleep(0.001)
@@ -63,11 +67,13 @@ class Camera():
             return self.current_frame
     
     def open(self):
-        self.cap = cv2.VideoCapture(self.index)
+        self.cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FOURCC, self.fourcc)
         self.cap.set(cv2.CAP_PROP_CONVERT_RGB, self.convert_rbg)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1]) 
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        self.cap.set(cv2.CAP_PROP_FPS, self.max_fps)
+        self.cap
         return self.cap
     
     def close(self):
