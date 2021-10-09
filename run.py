@@ -27,7 +27,7 @@ def analysis_loop(cam: Camera, screen: Screen):
 
 def main():
     cam = Camera(index=0, max_fps=30)
-    screen = Screen(cam)
+    screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE)
     screen.play_camera()
     #analysis_thread = Thread(target=analysis_loop, args=(cam, screen))
     #analysis_thread.start()
