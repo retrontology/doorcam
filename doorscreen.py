@@ -1,9 +1,12 @@
 import cv2
 import numpy as np
 from doorcam import *
+from evdev import InputDevice
+import select
 
 DEFAULT_FRAMEBUFFER_DEVICE='/dev/fb0'
 DEFAULT_BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
+DEFAULT_TOUCH_DEVICE='/dev/input/event0'
 DEFAULT_COLOR_CONV=cv2.COLOR_BGR2BGR565
 DEFAULT_RESOLUTION=(480,800)
 DEFAULT_DTYPE = np.uint16
@@ -54,8 +57,20 @@ class Screen():
             self.play_thread.start()
         else:
             self.activate = True
-
+    
     def play_loop(self):
+        self.turn_on()
+        checkpoint = time.time()
+        interval = 1.0/self.camera.max_fps
+        while True:
+            self.fb_write_image(self.camera.get_current_frame())
+            now = time.time()
+            while now - checkpoint < interval:
+                time.sleep(0.001)
+                now = time.time()
+
+
+    """ def play_loop(self):
         self.turn_on()
         start = time.time()
         now = time.time()
@@ -72,8 +87,8 @@ class Screen():
                 now = time.time()
             int_start = now
         self.turn_off()
-        self.play_thread = None
-    
+        self.play_thread = None """
+
     def process_image(self, image):
         if self.rotation != None:
             image = cv2.rotate(image, self.rotation)
