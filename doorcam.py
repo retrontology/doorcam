@@ -24,26 +24,24 @@ class Camera():
             self.convert_rbg = 1
         self.current_frame = None
         self.open()
-        self.capture_thread = Thread(target=self.capture_loop)
+        self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
-        self.fps_thread = Thread(target=self.fps_loop)
+        self.fps_thread = Thread(target=self.fps_loop, daemon=True)
         self.fps_thread.start()
 
     def capture_loop(self):
         checkpoint = time.time()
         interval = 1.0/self.max_fps
+        ret, frame = self.cap.read()
         while True:
-            frame = None
-            try:
-                frame = self.read()
-            except Exception as e:
-                print(e)
+            if ret:
+                self.current_frame = frame
+                self.frame_count += 1
+            ret, frame = self.cap.read()
             now = time.time()
             while(now - checkpoint < interval):
                 time.sleep(0.001)
                 now = time.time()
-            self.current_frame = frame
-            self.frame_count += 1
             checkpoint = now
     
     def fps_loop(self):
@@ -73,7 +71,7 @@ class Camera():
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self.cap.set(cv2.CAP_PROP_FPS, self.max_fps)
-        self.cap
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 4)
         return self.cap
     
     def close(self):
