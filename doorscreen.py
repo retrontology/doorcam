@@ -53,7 +53,7 @@ class Screen():
     def play_camera(self):
         if self.play_thread == None:
             self.activate = False
-            self.play_thread = Thread(target=self.play_loop)
+            self.play_thread = Thread(target=self.play_loop, daemon=True)
             self.play_thread.start()
         else:
             self.activate = True

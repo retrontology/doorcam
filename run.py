@@ -26,16 +26,17 @@ def analysis_loop(cam: Camera, screen: Screen):
         
 
 def main():
-    cam = Camera(index=0, max_fps=30)
+    cam = Camera(index=0)
     screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE)
     screen.play_camera()
-    #analysis_thread = Thread(target=analysis_loop, args=(cam, screen))
+    #analysis_thread = Thread(target=analysis_loop, args=(cam, screen), daemon=True)
     #analysis_thread.start()
     stream_handler = partial(MJPGStream, cam)
     server = HTTPServer((IP, PORT), stream_handler)
-    http_thread = Thread(target=server.serve_forever)
-    http_thread.start()
-        
+    #http_thread = Thread(target=server.serve_forever, daemon=True)
+    #http_thread.start()
+    server.serve_forever()
+    
 
 if __name__ == '__main__':
     main()
