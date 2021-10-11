@@ -10,7 +10,7 @@ DEFAULT_MAX_FPS=20
 
 class Camera():
 
-    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC, convert_rgb:bool = False):
+    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC):
         self.index = index
         self.resolution = resolution
         self.rotation = rotation
@@ -18,10 +18,6 @@ class Camera():
         self.frame_count = 0
         self.max_fps = max_fps
         self.fps = 0
-        if convert_rgb:
-            self.convert_rbg = 0
-        else:
-            self.convert_rbg = 1
         self.current_frame = None
         self.open()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
@@ -35,7 +31,8 @@ class Camera():
         ret, frame = self.cap.read()
         while True:
             if ret:
-                self.current_frame = frame
+                self.current_jpg = frame
+                self.current_frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
                 self.frame_count += 1
             ret, frame = self.cap.read()
             now = time.time()
@@ -67,7 +64,7 @@ class Camera():
     def open(self):
         self.cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FOURCC, self.fourcc)
-        self.cap.set(cv2.CAP_PROP_CONVERT_RGB, self.convert_rbg)
+        self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self.cap.set(cv2.CAP_PROP_FPS, self.max_fps)

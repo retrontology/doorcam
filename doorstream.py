@@ -19,18 +19,14 @@ class MJPGStream(BaseHTTPRequestHandler):
             self.send_header('Pragma', 'no-cache')
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
             self.end_headers()
-
             while True:
-                ret, image = cv2.imencode('.jpg', self.camera.get_current_frame())
-                if ret:
-                    self.wfile.write(b'--FRAME\r\n')
-                    self.send_header('Content-type', 'image/jpeg')
-                    self.send_header('Content-length', str(image.size))
-                    self.end_headers()
-                    self.wfile.write(image.tostring())
-                    self.wfile.write(b'\r\n')
-                else:
-                    continue
+                image = self.camera.current_jpg
+                self.wfile.write(b'--FRAME\r\n')
+                self.send_header('Content-type', 'image/jpeg')
+                self.send_header('Content-length', str(image.size))
+                self.end_headers()
+                self.wfile.write(image.tostring())
+                self.wfile.write(b'\r\n')
         else:
             self.send_error(404)
             self.end_headers()
