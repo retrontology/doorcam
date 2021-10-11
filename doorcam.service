@@ -1,8 +1,18 @@
 [Unit]
 Description=Python Doorcam Software
 
+Wants=network-online.target
+After=network-online.target
+
+BindsTo=dev-video0.device
+After=dev-video0.device
+
 [Service]
 User=pi
 Group=pi
+
 WorkingDirectory=/home/pi/git/doorcam/
 ExecStart=/usr/bin/python3 /home/pi/git/doorcam/run.py
+
+[Install]
+WantedBy=multi-user.target
