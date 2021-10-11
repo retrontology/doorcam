@@ -19,6 +19,8 @@ class MJPGStream(BaseHTTPRequestHandler):
             self.send_header('Pragma', 'no-cache')
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
             self.end_headers()
+            interval = 1.0/self.camera.max_fps
+            checkpoint = time.time()
             while True:
                 image = self.camera.current_jpg
                 self.wfile.write(b'--FRAME\r\n')
@@ -27,6 +29,11 @@ class MJPGStream(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(image.tostring())
                 self.wfile.write(b'\r\n')
+                now = time.time()
+                while now - checkpoint < interval:
+                    time.sleep(0.001)
+                    now = time.time()
+                checkpoint = now
         else:
             self.send_error(404)
             self.end_headers()

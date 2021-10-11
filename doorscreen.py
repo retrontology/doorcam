@@ -68,6 +68,8 @@ class Screen():
             while now - checkpoint < interval:
                 time.sleep(0.001)
                 now = time.time()
+            checkpoint = now
+
 
 
     """ def play_loop(self):
