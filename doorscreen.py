@@ -23,6 +23,8 @@ class Screen():
         self.dtype = dtype
         self.color_conv = color_conv
         self.play_thread = None
+        self.fps = 0
+        self.frame_count = 0
         self.turn_off()
 
     def fb_blank(self, data = 0):
@@ -55,15 +57,30 @@ class Screen():
             self.activate = False
             self.play_thread = Thread(target=self.play_loop, daemon=True)
             self.play_thread.start()
+            self.fps_thread = Thread(target=self.fps_loop, daemon=True)
+            self.fps_thread.start()
         else:
             self.activate = True
+    
+    def fps_loop(self):
+        checkpoint = time.time()
+        while True:
+            self.fps = self.frame_count
+            self.frame_count = 0
+            now = time.time()
+            while now - checkpoint < 1:
+                time.sleep(0.001)
+                now = time.time()
+            checkpoint = now
+
     
     def play_loop(self):
         self.turn_on()
         checkpoint = time.time()
         interval = 1.0/self.camera.max_fps
         while True:
-            self.fb_write_image(self.camera.get_current_frame())
+            self.fb_write_image(self.camera.current_frame)
+            self.frame_count += 1
             now = time.time()
             while now - checkpoint < interval:
                 time.sleep(0.001)
