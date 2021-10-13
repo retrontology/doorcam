@@ -18,7 +18,7 @@ class Camera():
         self.frame_count = 0
         self.max_fps = max_fps
         self.fps = 0
-        self.current_frame = None
+        self.current_jpg = None
         self.open()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
@@ -32,14 +32,13 @@ class Camera():
         while True:
             if ret:
                 self.current_jpg = frame
-                Thread(target=self.decode_frame, args=(frame,), daemon=True).start()
                 self.frame_count += 1
             ret, frame = self.cap.read()
-            now = time.time()
+            """ now = time.time()
             while(now - checkpoint < interval):
                 time.sleep(0.001)
                 now = time.time()
-            checkpoint = now
+            checkpoint = now """
     
     def fps_loop(self):
         checkpoint = time.time()
@@ -51,18 +50,6 @@ class Camera():
                 checkpoint = now
             else:
                 time.sleep(0.001)
-    
-    def decode_frame(self, frame):
-        self.current_frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-
-    def get_current_frame(self):
-        if self.rotation != None:
-            image = cv2.rotate(self.current_frame, self.rotation)
-            if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
-                image = cv2.resize(image, (self.resolution[1], self.resolution[0]))
-            return image
-        else:
-            return self.current_frame
     
     def open(self):
         self.cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)

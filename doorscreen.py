@@ -11,6 +11,7 @@ DEFAULT_COLOR_CONV=cv2.COLOR_BGR2BGR565
 DEFAULT_RESOLUTION=(480,800)
 DEFAULT_DTYPE = np.uint16
 DEFAULT_PERIOD = 10
+DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 
 class Screen():
 
@@ -79,7 +80,7 @@ class Screen():
         checkpoint = time.time()
         interval = 1.0/self.camera.max_fps
         while True:
-            self.fb_write_image(self.camera.current_frame)
+            self.fb_write_image(self.camera.current_jpg)
             self.frame_count += 1
             now = time.time()
             while now - checkpoint < interval:
@@ -108,7 +109,8 @@ class Screen():
         self.turn_off()
         self.play_thread = None """
 
-    def process_image(self, image):
+    def process_image(self, src):
+        image = cv2.imdecode(src, DECODE_FLAGS)
         if self.rotation != None:
             image = cv2.rotate(image, self.rotation)
         image = cv2.resize(image, self.resolution)
