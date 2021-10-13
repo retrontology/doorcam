@@ -6,7 +6,7 @@ import time
 DEFAULT_INDEX=0
 DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
 DEFAULT_RESOLUTION=(1920,1080)
-DEFAULT_MAX_FPS=20
+DEFAULT_MAX_FPS=30
 
 class Camera():
 
@@ -32,7 +32,7 @@ class Camera():
         while True:
             if ret:
                 self.current_jpg = frame
-                self.current_frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+                Thread(target=self.decode_frame, args=(frame,), daemon=True).start()
                 self.frame_count += 1
             ret, frame = self.cap.read()
             now = time.time()
@@ -51,6 +51,9 @@ class Camera():
                 checkpoint = now
             else:
                 time.sleep(0.001)
+    
+    def decode_frame(self, frame):
+        self.current_frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
 
     def get_current_frame(self):
         if self.rotation != None:

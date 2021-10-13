@@ -36,7 +36,9 @@ def main():
     #http_thread = Thread(target=server.serve_forever, daemon=True)
     #http_thread.start()
     server.serve_forever()
-    
+    #while True:
+    #    print(cam.fps)
+    #    time.sleep(1)
 
 if __name__ == '__main__':
     main()
