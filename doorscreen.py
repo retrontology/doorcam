@@ -12,6 +12,15 @@ DEFAULT_RESOLUTION=(480,800)
 DEFAULT_DTYPE = np.uint16
 DEFAULT_PERIOD = 10
 DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
+#DECODE_FLAGS = cv2.IMREAD_COLOR
+
+DIM=(480, 270)
+K=np.array([[135.85627595186807, 0.0, 250.50826117772505], [0.0, 136.96410060270327, 134.91000137514757], [0.0, 0.0, 1.0]])
+D=np.array([[-0.034783891502412054], [-0.059526871172676084], [0.06857836924819212], [-0.02426263352503455]])
+NK=K.copy()
+NK[0,0]=K[0,0]/1.8
+NK[1,1]=K[1,1]/1.8
+MAP1, MAP2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), NK, DIM, cv2.CV_16SC2)
 
 class Screen():
 
@@ -74,7 +83,6 @@ class Screen():
                 now = time.time()
             checkpoint = now
 
-    
     def play_loop(self):
         self.turn_on()
         checkpoint = time.time()
@@ -87,8 +95,6 @@ class Screen():
                 time.sleep(0.001)
                 now = time.time()
             checkpoint = now
-
-
 
     """ def play_loop(self):
         self.turn_on()
@@ -111,6 +117,7 @@ class Screen():
 
     def process_image(self, src):
         image = cv2.imdecode(src, DECODE_FLAGS)
+        image = cv2.remap(image, MAP1, MAP2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         if self.rotation != None:
             image = cv2.rotate(image, self.rotation)
         image = cv2.resize(image, self.resolution)

@@ -37,7 +37,7 @@ def main():
     #http_thread.start()
     server.serve_forever()
     #while True:
-    #    print(cam.fps)
+    #    print(f'Cam: {cam.fps} | Screen: {screen.fps}')
     #    time.sleep(1)
 
 if __name__ == '__main__':
