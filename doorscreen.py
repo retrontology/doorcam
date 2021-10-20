@@ -29,6 +29,7 @@ class Screen():
         self.touch_thread = Thread(target=self.touch_loop, daemon=True)
         self.touch_thread.start()
         self.fps = 0
+        self.frame = None
         self.frame_count = 0
         self.setup_undistort(undistort, undistort_K, undistort_D, undistort_K_scale)
         self.turn_off()
@@ -62,8 +63,8 @@ class Screen():
 
     def fb_write_image(self, image):
         try:
-            image = self.process_image(image)
-            self.fb_write(image.tobytes())
+            self.frame = self.process_image(image)
+            self.fb_write(self.frame.tobytes())
         except Exception as e:
             print(e)
 
