@@ -7,10 +7,11 @@ DEFAULT_INDEX=0
 DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
 DEFAULT_RESOLUTION=(1920,1080)
 DEFAULT_MAX_FPS=30
+DEFAULT_K_SCALE=1.8
 
 class Camera():
 
-    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC):
+    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC, undistort_K=None, undistort_D=None, undistort_K_scale=DEFAULT_K_SCALE):
         self.index = index
         self.resolution = resolution
         self.rotation = rotation
@@ -18,6 +19,9 @@ class Camera():
         self.frame_count = 0
         self.max_fps = max_fps
         self.fps = 0
+        self.undistort_K = undistort_K
+        self.undistort_D = undistort_D
+        self.undistort_K_scale = undistort_K_scale
         self.current_jpg = None
         self.open()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)

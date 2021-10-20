@@ -16,7 +16,7 @@ DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 
 class Screen():
 
-    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, touchdev=DEFAULT_TOUCH_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
+    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, touchdev=DEFAULT_TOUCH_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True):
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
@@ -31,24 +31,26 @@ class Screen():
         self.fps = 0
         self.frame = None
         self.frame_count = 0
-        self.setup_undistort(undistort, undistort_K, undistort_D, undistort_K_scale)
+        self.setup_undistort(undistort)
         self.turn_off()
     
-    def setup_undistort(self, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
+    def setup_undistort(self, undistort=True):
         self.undistort = undistort
         undistort_DIM=tuple([int(x/4) for x in self.camera.resolution])
         print(undistort_DIM)
-        if type(undistort_K) is np.ndarray:
-            undistort_K = undistort_K
+        if type(self.camera.undistort_K) is np.ndarray:
+            undistort_K = self.camera.undistort_K/4
+            undistort_K[2][2] = 1.0
         else:
             undistort_K=np.array([[undistort_DIM[1]/2, 0, undistort_DIM[0]/2], [0, undistort_DIM[1]/2, undistort_DIM[1]/2], [0, 0, 1]])
-        if type(undistort_D) is np.ndarray:
-            undistort_D = undistort_D
+        if type(self.camera.undistort_D) is np.ndarray:
+            undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([0.01, -0.01, 0.01, -0.01])
         undistort_NK = undistort_K.copy()
-        undistort_NK[0,0] = undistort_K[0,0]/undistort_K_scale
-        undistort_NK[1,1] = undistort_K[1,1]/undistort_K_scale
+        if self.camera.undistort_K_scale != 1:
+            undistort_NK[0,0] = undistort_K[0,0]/self.camera.undistort_K_scale
+            undistort_NK[1,1] = undistort_K[1,1]/self.camera.undistort_K_scale
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
 
     def fb_blank(self, data = 0):
