@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from doorcam import *
 from evdev import InputDevice
-import select
+from select import select
 
 DEFAULT_FRAMEBUFFER_DEVICE='/dev/fb0'
 DEFAULT_BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
@@ -16,15 +16,18 @@ DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 
 class Screen():
 
-    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
+    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, touchdev=DEFAULT_TOUCH_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
         self.fbdev = fbdev
         self.bldev = bldev
+        self.touchdev = touchdev
         self.dtype = dtype
         self.color_conv = color_conv
         self.play_thread = None
+        self.touch_thread = Thread(target=self.touch_loop, daemon=True)
+        self.touch_thread.start()
         self.fps = 0
         self.frame_count = 0
         self.setup_undistort(undistort, undistort_K, undistort_D, undistort_K_scale)
@@ -77,10 +80,20 @@ class Screen():
             self.activate = False
             self.play_thread = Thread(target=self.play_loop, daemon=True)
             self.play_thread.start()
-            self.fps_thread = Thread(target=self.fps_loop, daemon=True)
-            self.fps_thread.start()
+            #self.fps_thread = Thread(target=self.fps_loop, daemon=True)
+            #self.fps_thread.start()
         else:
             self.activate = True
+    
+    def touch_loop(self):
+        dev = InputDevice(self.touchdev)
+        while True:
+            r,w,x = select([dev] ,[], [])
+            for event in dev.read():
+                e = event
+            print('END')
+            self.play_camera()
+            time.sleep(0.1)
     
     def fps_loop(self):
         checkpoint = time.time()
@@ -93,7 +106,7 @@ class Screen():
                 now = time.time()
             checkpoint = now
 
-    def play_loop(self):
+    """ def play_loop(self):
         self.turn_on()
         checkpoint = time.time()
         interval = 1.0/self.camera.max_fps
@@ -104,9 +117,9 @@ class Screen():
             while now - checkpoint < interval:
                 time.sleep(0.001)
                 now = time.time()
-            checkpoint = now
+            checkpoint = now """
 
-    """ def play_loop(self):
+    def play_loop(self):
         self.turn_on()
         start = time.time()
         now = time.time()
@@ -115,7 +128,7 @@ class Screen():
             if self.activate:
                 start = time.time()
                 self.activate = False
-            self.fb_write_image(self.camera.get_current_frame())
+            self.fb_write_image(self.camera.current_jpg)
             self.frame_count += 1
             now = time.time()
             int_start = now
@@ -124,7 +137,7 @@ class Screen():
                 now = time.time()
             int_start = now
         self.turn_off()
-        self.play_thread = None """
+        self.play_thread = None
 
     def process_image(self, src):
         image = cv2.imdecode(src, DECODE_FLAGS)
