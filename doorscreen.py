@@ -6,7 +6,7 @@ import select
 
 DEFAULT_FRAMEBUFFER_DEVICE='/dev/fb0'
 DEFAULT_BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
-DEFAULT_TOUCH_DEVICE='/dev/input/event0'
+DEFAULT_TOUCH_DEVICE='/dev/input/event1'
 DEFAULT_COLOR_CONV=cv2.COLOR_BGR2BGR565
 DEFAULT_RESOLUTION=(480,800)
 DEFAULT_DTYPE = np.uint16
@@ -14,17 +14,9 @@ DEFAULT_PERIOD = 10
 DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
-DIM=(480, 270)
-K=np.array([[135.85627595186807, 0.0, 250.50826117772505], [0.0, 136.96410060270327, 134.91000137514757], [0.0, 0.0, 1.0]])
-D=np.array([[-0.034783891502412054], [-0.059526871172676084], [0.06857836924819212], [-0.02426263352503455]])
-NK=K.copy()
-NK[0,0]=K[0,0]/1.8
-NK[1,1]=K[1,1]/1.8
-MAP1, MAP2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), NK, DIM, cv2.CV_16SC2)
-
 class Screen():
 
-    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE):
+    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
@@ -35,7 +27,25 @@ class Screen():
         self.play_thread = None
         self.fps = 0
         self.frame_count = 0
+        self.setup_undistort(undistort, undistort_K, undistort_D, undistort_K_scale)
         self.turn_off()
+    
+    def setup_undistort(self, undistort=True, undistort_K=None, undistort_D=None, undistort_K_scale=1.8):
+        self.undistort = undistort
+        undistort_DIM=tuple([int(x/4) for x in self.camera.resolution])
+        print(undistort_DIM)
+        if type(undistort_K) is np.ndarray:
+            undistort_K = undistort_K
+        else:
+            undistort_K=np.array([[undistort_DIM[1]/2, 0, undistort_DIM[0]/2], [0, undistort_DIM[1]/2, undistort_DIM[1]/2], [0, 0, 1]])
+        if type(undistort_D) is np.ndarray:
+            undistort_D = undistort_D
+        else:
+            undistort_D = np.array([0.01, -0.01, 0.01, -0.01])
+        undistort_NK = undistort_K.copy()
+        undistort_NK[0,0] = undistort_K[0,0]/undistort_K_scale
+        undistort_NK[1,1] = undistort_K[1,1]/undistort_K_scale
+        self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
 
     def fb_blank(self, data = 0):
         blank = np.array([[data]], dtype=self.dtype)
@@ -106,6 +116,7 @@ class Screen():
                 start = time.time()
                 self.activate = False
             self.fb_write_image(self.camera.get_current_frame())
+            self.frame_count += 1
             now = time.time()
             int_start = now
             while now - int_start < interval:
@@ -117,7 +128,8 @@ class Screen():
 
     def process_image(self, src):
         image = cv2.imdecode(src, DECODE_FLAGS)
-        image = cv2.remap(image, MAP1, MAP2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        if self.undistort:
+            image = cv2.remap(image, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         if self.rotation != None:
             image = cv2.rotate(image, self.rotation)
         image = cv2.resize(image, self.resolution)
