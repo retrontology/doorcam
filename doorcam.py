@@ -53,7 +53,7 @@ class Camera():
                 self.frame_count = 0
                 checkpoint = now
             else:
-                time.sleep(0.001)
+                time.sleep(0.1)
     
     def open(self):
         self.cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)

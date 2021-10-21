@@ -29,6 +29,7 @@ class Screen():
         self.touch_thread = Thread(target=self.touch_loop, daemon=True)
         self.touch_thread.start()
         self.fps = 0
+        self.fps_stop = False
         self.frame = None
         self.frame_count = 0
         self.setup_undistort(undistort)
@@ -83,8 +84,9 @@ class Screen():
             self.activate = False
             self.play_thread = Thread(target=self.play_loop, daemon=True)
             self.play_thread.start()
-            #self.fps_thread = Thread(target=self.fps_loop, daemon=True)
-            #self.fps_thread.start()
+            self.fps_stop = False
+            self.fps_thread = Thread(target=self.fps_loop, daemon=True)
+            self.fps_thread.start()
         else:
             self.activate = True
     
@@ -105,9 +107,13 @@ class Screen():
             self.frame_count = 0
             now = time.time()
             while now - checkpoint < 1:
-                time.sleep(0.001)
+                time.sleep(0.1)
                 now = time.time()
             checkpoint = now
+            if self.fps_stop:
+                self.fps_stop = False
+                self.fps_thread = None
+                break
 
     """ def play_loop(self):
         self.turn_on()
