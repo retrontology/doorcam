@@ -1,9 +1,13 @@
 import cv2
 import numpy as np
-from http.server import BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from doorcam import *
 
-class MJPGStream(BaseHTTPRequestHandler):
+class MJPGServer(ThreadingMixIn, HTTPServer):
+    pass
+
+class MJPGHandler(BaseHTTPRequestHandler):
 
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera

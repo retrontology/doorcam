@@ -6,7 +6,6 @@ from doorcam import *
 from doorstream import *
 from dooranalyzer import *
 import time
-from http.server import HTTPServer
 from functools import partial
 
 IP='192.168.1.24'
@@ -20,8 +19,8 @@ def main():
     screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE, undistort=False)
     screen.play_camera()
     analyzer = Analyzer(cam, screen)
-    stream_handler = partial(MJPGStream, cam)
-    server = HTTPServer((IP, PORT), stream_handler)
+    stream_handler = partial(MJPGHandler, cam)
+    server = MJPGServer((IP, PORT), stream_handler)
     #http_thread = Thread(target=server.serve_forever, daemon=True)
     #http_thread.start()
     server.serve_forever()
