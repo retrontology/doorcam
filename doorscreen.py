@@ -48,10 +48,13 @@ class Screen():
             undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([0.01, -0.01, 0.01, -0.01])
-        undistort_NK = undistort_K.copy()
-        if self.camera.undistort_K_scale != 1:
-            undistort_NK[0,0] = undistort_K[0,0]/self.camera.undistort_K_scale
-            undistort_NK[1,1] = undistort_K[1,1]/self.camera.undistort_K_scale
+        if type(self.camera.undistort_NK) is np.ndarray:
+            undistort_NK = self.camera.undistort_NK/4
+            undistort_NK[2][2] = 1.0
+        else:
+            undistort_NK = undistort_K.copy()
+            undistort_NK[0,0] = undistort_K[0,0]/DEFAULT_K_SCALE
+            undistort_NK[1,1] = undistort_K[1,1]/DEFAULT_K_SCALE
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
 
     def fb_blank(self, data = 0):
