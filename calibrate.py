@@ -41,7 +41,7 @@ def write_points(image_dir):
     print(f'ishape = {img.shape}')
     return (point_dir, _img_shape, gray.shape, img.shape)
 
-def calculate_K_D(point_dir, ishape):
+def calculate_K_D(point_dir, ishape, balance=1):
     img_dim = ishape[:2]
     objpoints = []
     imgpoints = []
@@ -69,18 +69,14 @@ def calculate_K_D(point_dir, ishape):
         (cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6))
 
     DIM= img_dim
-    balance=1
 
     print(f'{K} * {img_dim[0]} / {DIM[0]} = {K * img_dim[0] / DIM[0]}')
 
-    scaled_K = K * img_dim[0] / DIM[0]  
-    scaled_K[2][2] = 1.0  
-    new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(scaled_K, D, DIM, np.eye(3), balance=balance)
+    new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(K, D, DIM, np.eye(3), balance=balance)
 
     print("DIM=" + str(img_dim))
     print("K=np.array(" + str(K.tolist()) + ")")
     print("new_K=np.array(" + str(new_K.tolist()) + ")")
-    print("scaled_K=np.array(" + str(scaled_K.tolist()) + ")")
     print("D=np.array(" + str(D.tolist()) + ")")
 
 
