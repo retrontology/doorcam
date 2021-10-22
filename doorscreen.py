@@ -38,7 +38,6 @@ class Screen():
     def setup_undistort(self, undistort=True):
         self.undistort = undistort
         undistort_DIM=tuple([int(x/4) for x in self.camera.resolution])
-        print(undistort_DIM)
         if type(self.camera.undistort_K) is np.ndarray:
             undistort_K = self.camera.undistort_K/4
             undistort_K[2][2] = 1.0
@@ -99,7 +98,6 @@ class Screen():
             r,w,x = select([dev] ,[], [])
             for event in dev.read():
                 e = event
-            print('END')
             self.play_camera()
             time.sleep(0.1)
     
