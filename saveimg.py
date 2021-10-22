@@ -16,6 +16,7 @@ def main():
         with open(name, 'wb') as out:
             out.write(cam.current_jpg)
         print(f'Written: {name}')
+        time.sleep(0.5)
 
 if __name__ == '__main__':
     main()

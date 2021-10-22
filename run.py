@@ -11,13 +11,13 @@ from functools import partial
 
 IP='192.168.1.24'
 PORT=8080
-K=np.array([[543.4251038074723, 0.0, 1002.0330447109002], [0.0, 547.8564024108131, 539.6400055005903], [0.0, 0.0, 1.0]])
-D=np.array([[-0.034783891502412054], [-0.059526871172676084], [0.06857836924819212], [-0.02426263352503455]])
+K=np.array([[539.8606873339231, 0.0, 999.745990731636], [0.0, 540.4889507343736, 541.3382370501859], [0.0, 0.0, 1.0]])
+D=np.array([[-0.06300247530706406], [0.028367414247228113], [-0.018682028009339952], [0.0037199220124150604]])
 K_SCALE=1.8
 
 def main():
     cam = Camera(undistort_K=K, undistort_D=D, undistort_K_scale=1.8)
-    screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE, undistort=False)
+    screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE, undistort=True)
     screen.play_camera()
     analyzer = Analyzer(cam, screen)
     stream_handler = partial(MJPGStream, cam)
