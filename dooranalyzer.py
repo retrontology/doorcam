@@ -34,7 +34,11 @@ class Analyzer():
                 print(e)
                 time.sleep(1)
                 continue
-            frame = cv2.GaussianBlur(frame, (21,21), 0)
+            try:
+                frame = cv2.GaussianBlur(frame, (21,21), 0)
+            except Exception as e:
+                print(e)
+                continue
             if frame_average is None:
                 frame_average = frame.copy().astype('float')
             cv2.accumulateWeighted(frame, frame_average, 0.5)
