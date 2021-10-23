@@ -16,7 +16,7 @@ D=np.array([[-0.06300247530706406], [0.028367414247228113], [-0.0186820280093399
 
 def main():
     cam = Camera(undistort_K=K, undistort_D=D, undistort_NK=NK)
-    screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE, undistort=False)
+    screen = Screen(cam, rotation=cv2.ROTATE_90_CLOCKWISE, undistort=True)
     screen.play_camera()
     analyzer = Analyzer(cam, screen)
     stream_handler = partial(MJPGHandler, cam)
