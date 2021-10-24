@@ -31,13 +31,8 @@ class Analyzer():
         while True:
             try:
                 frame = cv2.imdecode(self.camera.current_jpg, DECODE_FLAGS)
-            except Exception as e:
-                print(e)
-                time.sleep(1)
-                continue
-            if self.undistort:
-                frame = cv2.remap(frame, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-            try:
+                if self.undistort:
+                    frame = cv2.remap(frame, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
                 frame = cv2.GaussianBlur(frame, (21,21), 0)
             except Exception as e:
                 print(e)
