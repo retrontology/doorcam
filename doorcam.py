@@ -3,12 +3,6 @@ import numpy as np
 from threading import Thread
 import time
 
-DEFAULT_INDEX=0
-DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-DEFAULT_RESOLUTION=(1920,1080)
-DEFAULT_MAX_FPS=30
-DEFAULT_K_SCALE=2
-
 class Camera():
 
     def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC, undistort_K=None, undistort_D=None, undistort_NK=None):

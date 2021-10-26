@@ -3,14 +3,11 @@ from doorscreen import *
 from doorcam import *
 import time
 
-DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
-DEFAULT_DELTA_THRESHOLD = 5
-DEFAULT_CONTOUR_MIN_AREA = 5000
-DEFAULT_ANALYSIS_FPS = 5
+ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
 
 class Analyzer():
 
-    def __init__(self, cam: Camera, screen: Screen = None, max_fps=DEFAULT_ANALYSIS_FPS, delta_threshold=DEFAULT_DELTA_THRESHOLD, contour_min_area=DEFAULT_CONTOUR_MIN_AREA, undistort=True, undistort_balance=1):
+    def __init__(self, cam: Camera, screen: Screen, max_fps, delta_threshold, contour_min_area, undistort=True, undistort_balance=1):
         self.camera = cam
         self.screen = screen
         self.delta_threshold = delta_threshold
@@ -23,6 +20,7 @@ class Analyzer():
         self.analysis_fps_thread.start()
         self.analysis_thread = Thread(target=self.analysis_loop, daemon=True)
         self.analysis_thread.start()
+        
 
     def analysis_loop(self):
         frame_average = None
@@ -30,7 +28,7 @@ class Analyzer():
         checkpoint = time.time()
         while True:
             try:
-                frame = cv2.imdecode(self.camera.current_jpg, DECODE_FLAGS)
+                frame = cv2.imdecode(self.camera.current_jpg, ANALYZER_DECODE_FLAGS)
                 if self.undistort:
                     frame = cv2.remap(frame, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
                 frame = cv2.GaussianBlur(frame, (21,21), 0)

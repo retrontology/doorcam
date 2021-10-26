@@ -4,13 +4,6 @@ from doorcam import *
 from evdev import InputDevice
 from select import select
 
-DEFAULT_FRAMEBUFFER_DEVICE='/dev/fb0'
-DEFAULT_BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
-DEFAULT_TOUCH_DEVICE='/dev/input/event1'
-DEFAULT_COLOR_CONV=cv2.COLOR_BGR2BGR565
-DEFAULT_RESOLUTION=(480,800)
-DEFAULT_DTYPE = np.uint16
-DEFAULT_PERIOD = 10
 DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
