@@ -18,7 +18,6 @@ class Screen():
         self.touchdev = touchdev
         self.dtype = dtype
         self.color_conv = color_conv
-        self.play_thread = None
         self.activation_period = activation_period
         self.touch_thread = Thread(target=self.touch_loop, daemon=True)
         self.touch_thread.start()
@@ -26,8 +25,13 @@ class Screen():
         self.fps_stop = False
         self.frame = None
         self.frame_count = 0
+        self.activate = True
         self.setup_undistort(undistort, undistort_balance)
         self.turn_off()
+        self.fps_thread = Thread(target=self.fps_loop)
+        self.fps_thread.start()
+        self.play_thread = Thread(target=self.play_loop)
+        self.play_thread.start()
     
     def setup_undistort(self, undistort=True, undistort_balance=1):
         self.undistort = undistort
@@ -70,15 +74,7 @@ class Screen():
             backlight.write(out)
     
     def play_camera(self):
-        if self.play_thread == None:
-            self.activate = False
-            self.play_thread = Thread(target=self.play_loop, daemon=True)
-            self.play_thread.start()
-            self.fps_stop = False
-            self.fps_thread = Thread(target=self.fps_loop, daemon=True)
-            self.fps_thread.start()
-        else:
-            self.activate = True
+        self.activate = True
     
     def touch_loop(self):
         dev = InputDevice(self.touchdev)
@@ -99,10 +95,6 @@ class Screen():
                 time.sleep(0.1)
                 now = time.time()
             checkpoint = now
-            if self.fps_stop:
-                self.fps_stop = False
-                self.fps_thread = None
-                break
 
     """ def play_loop(self):
         self.turn_on()
@@ -116,26 +108,29 @@ class Screen():
                 time.sleep(0.001)
                 now = time.time()
             checkpoint = now """
-
+    
     def play_loop(self):
-        self.turn_on()
-        start = time.time()
-        now = time.time()
         interval = 1.0/self.camera.max_fps
-        while now - start < self.activation_period:
-            if self.activate:
-                start = time.time()
-                self.activate = False
-            self.fb_write_image(self.camera.current_jpg)
-            self.frame_count += 1
+        while True:
+            while not self.activate:
+                time.sleep(0.1)
+            self.activate = False
             now = time.time()
-            int_start = now
-            while now - int_start < interval:
-                time.sleep(0.001)
+            start = now
+            checkpoint = now
+            self.turn_on()
+            while now - start < self.activation_period:
+                self.fb_write_image(self.camera.current_jpg)
+                self.frame_count += 1
                 now = time.time()
-            int_start = now
-        self.turn_off()
-        self.play_thread = None
+                while now - checkpoint < interval:
+                    time.sleep(0.01)
+                    now = time.time()
+                checkpoint = now
+                if self.activate:
+                    self.activate = False
+                    start = now
+            self.turn_off()
 
     def process_image(self, src):
         image = cv2.imdecode(src, SCREEN_DECODE_FLAGS)

@@ -11,6 +11,8 @@ import time
 from functools import partial
 import argparse
 
+def setup_logger():
+    pass
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -20,6 +22,7 @@ def parse_args():
 def main():
     args = parse_args()
     config = Config(args.config)
+    logger = setup_logger()
     cam = Camera(
         config['camera']['index'], 
         config['camera']['resolution'], 
