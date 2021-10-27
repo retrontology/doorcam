@@ -11,18 +11,19 @@ import time
 from functools import partial
 import argparse
 
-def setup_logger():
+def setup_logger(debug=False):
     pass
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', help='config file to use', default='config.yaml')
+    parser.add_argument('-c', '--config', default=os.path.join(os.path.dirname('__file__'), 'config.yaml'), metavar='config.yaml')
+    parser.add_argument('-d', '--debug', action='store_true')
     return parser.parse_args()
 
 def main():
     args = parse_args()
     config = Config(args.config)
-    logger = setup_logger()
+    logger = setup_logger(args.debug)
     cam = Camera(
         config['camera']['index'], 
         config['camera']['resolution'], 

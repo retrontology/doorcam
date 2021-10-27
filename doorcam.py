@@ -2,10 +2,14 @@ import cv2
 import numpy as np
 from threading import Thread
 import time
+from logging import Logger
 
 class Camera():
 
+    logger = Logger('doorcam.camera')
+
     def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array):
+        self.logger.debug(f'Initializing camera at index {index}')
         self.index = index
         self.resolution = resolution
         self.rotation = rotation
@@ -21,6 +25,7 @@ class Camera():
         self.capture_thread.start()
         self.fps_thread = Thread(target=self.fps_loop, daemon=True)
         self.fps_thread.start()
+        self.logger.debug(f'Camera at index {index} is intialized!!!')
 
     def capture_loop(self):
         checkpoint = time.time()
@@ -30,7 +35,11 @@ class Camera():
             if ret:
                 self.current_jpg = frame
                 self.frame_count += 1
-            ret, frame = self.cap.read()
+            try:
+                ret, frame = self.cap.read()
+            except Exception as e:
+                self.logger.error(e)
+                time.sleep(1)
             """ now = time.time()
             while(now - checkpoint < interval):
                 time.sleep(0.001)

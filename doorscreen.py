@@ -3,13 +3,17 @@ import numpy as np
 from doorcam import *
 from evdev import InputDevice
 from select import select
+from logging import Logger
 
 SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
 
+    logger = Logger('doorcam.screen')
+
     def __init__(self, camera:Camera, resolution:tuple, rotation, fbdev:str, bldev:str, touchdev:str, color_conv, dtype, activation_period:int, undistort:bool, undistort_balance:float):
+        self.logger.debug(f'Initializing screen located at {fbdev} ...')
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
@@ -32,8 +36,10 @@ class Screen():
         self.fps_thread.start()
         self.play_thread = Thread(target=self.play_loop)
         self.play_thread.start()
+        self.logger.debug(f'Screen located at {fbdev} initialized!')
     
     def setup_undistort(self, undistort=True, undistort_balance=1):
+        self.logger.debug(f'Calculating distortion maps...')
         self.undistort = undistort
         undistort_DIM=tuple([int(x/4) for x in self.camera.resolution])
         if type(self.camera.undistort_K) is np.ndarray:
@@ -47,12 +53,14 @@ class Screen():
             undistort_D = np.array([-0.01, 0.01, -0.01, 0.01])
         undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
+        self.logger.debug(f'Distortion maps calculated!')
 
     def fb_blank(self, data = 0):
         blank = np.array([[data]], dtype=self.dtype)
         blank = np.repeat(blank, self.resolution[0], 1)
         blank = np.repeat(blank, self.resolution[1], 0)
         self.fb_write(blank.tobytes())
+        self.logger.debug(f'Screen blanked')
 
     def fb_write(self, data):
         with open(self.fbdev, 'wb') as fb:
@@ -75,6 +83,7 @@ class Screen():
     
     def play_camera(self):
         self.activate = True
+        self.logger.debug(f'Screen activated')
     
     def touch_loop(self):
         dev = InputDevice(self.touchdev)
@@ -82,6 +91,7 @@ class Screen():
             r,w,x = select([dev] ,[], [])
             for event in dev.read():
                 e = event
+            self.logger.debug('Screen touched')
             self.play_camera()
             time.sleep(0.1)
     
@@ -145,7 +155,9 @@ class Screen():
     def turn_off(self):
         self.fb_blank()
         self.bl_set(False)
+        self.logger.debug('Turned off')
     
     def turn_on(self):
         self.fb_blank()
         self.bl_set(True)
+        self.logger.debug('Turned on')

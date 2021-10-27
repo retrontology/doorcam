@@ -9,6 +9,8 @@ class MJPGServer(ThreadingMixIn, HTTPServer):
 
 class MJPGHandler(BaseHTTPRequestHandler):
 
+    logger = Logger('doorcam.stream')
+
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera
         super().__init__(*args, **kwargs)
@@ -25,14 +27,19 @@ class MJPGHandler(BaseHTTPRequestHandler):
             self.end_headers()
             interval = 1.0/self.camera.max_fps
             checkpoint = time.time()
+            self.logger.debug(f'Serving MJPG stream to {self.client_address}')
             while True:
                 image = self.camera.current_jpg
-                self.wfile.write(b'--FRAME\r\n')
-                self.send_header('Content-type', 'image/jpeg')
-                self.send_header('Content-length', str(image.size))
-                self.end_headers()
-                self.wfile.write(image.tostring())
-                self.wfile.write(b'\r\n')
+                try:
+                    self.wfile.write(b'--FRAME\r\n')
+                    self.send_header('Content-type', 'image/jpeg')
+                    self.send_header('Content-length', str(image.size))
+                    self.end_headers()
+                    self.wfile.write(image.tostring())
+                    self.wfile.write(b'\r\n')
+                except Exception as e:
+                    self.logger.error(e)
+                    self.logger.debug(f'Stopping MJPG stream to {self.client_address}')
                 now = time.time()
                 while now - checkpoint < interval:
                     time.sleep(0.001)

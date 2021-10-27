@@ -2,6 +2,7 @@ import yaml
 import os
 import cv2
 import numpy as np
+from logging import Logger
 
 DEFAULT_ANALYSIS_DELTA_THRESHOLD=5
 DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=5000
@@ -30,7 +31,10 @@ DEFAULT_STREAM_PORT = 8080
 
 class Config(dict):
 
+    logger = Logger('doorcam.config')
+
     def __init__(self, path, *args, **kwargs):
+        self.logger.debug('Intializing config from file at {path}')
         super().__init__(*args, **kwargs)
         self.path = path
         self.load_defaults()
@@ -39,8 +43,10 @@ class Config(dict):
         else:
             self.save()
             self.init_constants()
+        self.logger.debug('Config from file {path} has been initialized!')
 
     def init_constants(self):
+        self.logger.debug('Intializing constants from file at {path}')
         self['camera']['fourcc'] = string_to_fourcc(self['camera']['format'])
         self['camera']['resolution'] = rstring_to_rtuple(self['camera']['resolution'])
         if self['camera']['rotation'] is None:
@@ -60,6 +66,7 @@ class Config(dict):
             self['screen']['rotation_const'] = cstring_to_cvconstant(self['screen']['rotation'])
         self['screen']['color_conv_const'] = cstring_to_cvconstant(self['screen']['color_conv'])
         self['screen']['dtype_np'] = string_to_dtype(self['screen']['dtype'])
+        self.logger.debug('Constants from file {path} has been initialized!')
 
     def clear_constants(self):
         del self['camera']['fourcc']
@@ -71,6 +78,7 @@ class Config(dict):
         del self['screen']['rotation_const']
         del self['screen']['color_conv_const']
         del self['screen']['dtype_np']
+        self.logger.debug('Constants from file {path} has been cleared!')
 
 
     def load(self):
@@ -79,6 +87,7 @@ class Config(dict):
                 self.update(yaml.safe_load(stream).copy())
             except yaml.YAMLError as e:
                 print(e)
+        self.logger.debug(f'Loaded config from {self.path}')
         self.init_constants()
     
     def load_defaults(self):
@@ -125,6 +134,7 @@ class Config(dict):
                 stream.write(yaml.safe_dump(self.copy()))
             except yaml.YAMLError as e:
                 print(e)
+            self.logger.debug(f'Saved config to {self.path}')
     
 def rstring_to_rtuple(resolution:str):
     resolution = resolution.lower()
