@@ -4,12 +4,12 @@ from doorcam import *
 from evdev import InputDevice
 from select import select
 
-DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
+SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
 
-    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, touchdev=DEFAULT_TOUCH_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_balance=1):
+    def __init__(self, camera:Camera, resolution:tuple, rotation, fbdev:str, bldev:str, touchdev:str, color_conv, dtype, activation_period:int, undistort:bool, undistort_balance:float):
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
@@ -19,6 +19,7 @@ class Screen():
         self.dtype = dtype
         self.color_conv = color_conv
         self.play_thread = None
+        self.activation_period = activation_period
         self.touch_thread = Thread(target=self.touch_loop, daemon=True)
         self.touch_thread.start()
         self.fps = 0
@@ -40,11 +41,7 @@ class Screen():
             undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([-0.01, 0.01, -0.01, 0.01])
-        if type(self.camera.undistort_NK) is np.ndarray:
-            undistort_NK = self.camera.undistort_NK/4
-            undistort_NK[2][2] = 1.0
-        else:
-            undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
+        undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
 
     def fb_blank(self, data = 0):
@@ -125,7 +122,7 @@ class Screen():
         start = time.time()
         now = time.time()
         interval = 1.0/self.camera.max_fps
-        while now - start < DEFAULT_PERIOD:
+        while now - start < self.activation_period:
             if self.activate:
                 start = time.time()
                 self.activate = False
@@ -141,7 +138,7 @@ class Screen():
         self.play_thread = None
 
     def process_image(self, src):
-        image = cv2.imdecode(src, DECODE_FLAGS)
+        image = cv2.imdecode(src, SCREEN_DECODE_FLAGS)
         if self.undistort:
             image = cv2.remap(image, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         if self.rotation != None:

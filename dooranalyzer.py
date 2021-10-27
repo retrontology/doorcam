@@ -7,7 +7,7 @@ ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
 
 class Analyzer():
 
-    def __init__(self, cam: Camera, screen: Screen, max_fps, delta_threshold, contour_min_area, undistort=True, undistort_balance=1):
+    def __init__(self, cam: Camera, screen: Screen, max_fps:int, delta_threshold:int, contour_min_area:int, undistort:bool, undistort_balance:float):
         self.camera = cam
         self.screen = screen
         self.delta_threshold = delta_threshold
@@ -21,7 +21,6 @@ class Analyzer():
         self.analysis_thread = Thread(target=self.analysis_loop, daemon=True)
         self.analysis_thread.start()
         
-
     def analysis_loop(self):
         frame_average = None
         interval = 1.0/self.max_fps
@@ -77,8 +76,5 @@ class Analyzer():
             undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([0.01, -0.01, 0.01, -0.01])
-        if type(self.camera.undistort_NK) is np.ndarray:
-            undistort_NK = self.camera.undistort_NK
-        else:
-            undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
+        undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
