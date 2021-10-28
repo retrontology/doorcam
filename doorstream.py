@@ -27,7 +27,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
             self.end_headers()
             interval = 1.0/self.camera.max_fps
             checkpoint = time.time()
-            self.logger.debug(f'Serving MJPG stream to {self.client_address}')
+            self.logger.info(f'Serving MJPG stream to {self.client_address}')
             while True:
                 image = self.camera.current_jpg
                 try:
@@ -39,7 +39,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b'\r\n')
                 except Exception as e:
                     self.logger.error(e)
-                    self.logger.debug(f'Stopping MJPG stream to {self.client_address}')
+                    self.logger.info(f'Stopping MJPG stream to {self.client_address}')
                 now = time.time()
                 while now - checkpoint < interval:
                     time.sleep(0.001)
