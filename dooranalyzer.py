@@ -37,7 +37,7 @@ class Analyzer():
                     frame = cv2.remap(frame, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
                 frame = cv2.GaussianBlur(frame, (21,21), 0)
             except Exception as e:
-                print(e)
+                self.logger.error(e)
                 continue
             if frame_average is None:
                 frame_average = frame.copy().astype('float')

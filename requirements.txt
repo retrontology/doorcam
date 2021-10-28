@@ -2,3 +2,4 @@ evdev==1.4.0
 numpy==1.19.5
 opencv_python==4.5.3.56
 PyYAML==6.0
+systemd==0.16.1

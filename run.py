@@ -10,14 +10,23 @@ from doorconfig import *
 import time
 from functools import partial
 import argparse
+from logging import Logger, StreamHandler, DEBUG, INFO
+from systemd import journal
 
 def setup_logger(debug=False):
-    pass
+    logger = Logger('doorcam')
+    logger.addHandler(journal.JournaldLogHandler())
+    logger.addHandler(StreamHandler())
+    if debug:
+        logger.setLevel(DEBUG)
+    else:
+        logger.setLevel(INFO)
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', default=os.path.join(os.path.dirname('__file__'), 'config.yaml'), metavar='config.yaml')
     parser.add_argument('-d', '--debug', action='store_true')
+    parser.add_argument('-f', '--fps', action='store_true')
     return parser.parse_args()
 
 def main():
@@ -58,12 +67,15 @@ def main():
     )
     stream_handler = partial(MJPGHandler, cam)
     server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
-    #http_thread = Thread(target=server.serve_forever, daemon=True)
-    #http_thread.start()
-    server.serve_forever()
-    #while True:
-    #    print(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
-    #    time.sleep(1)
+    if args.fps:
+        http_thread = Thread(target=server.serve_forever, daemon=True)
+        http_thread.start()
+        while True:
+            logger.info(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
+            time.sleep(1)
+    else:
+        server.serve_forever()
+    
 
 if __name__ == '__main__':
     main()

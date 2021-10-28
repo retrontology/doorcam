@@ -71,7 +71,7 @@ class Screen():
             self.frame = self.process_image(image)
             self.fb_write(self.frame.tobytes())
         except Exception as e:
-            print(e)
+            self.logger.error(e)
 
     def bl_set(self, flag: bool):
         if flag:

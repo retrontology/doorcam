@@ -86,7 +86,7 @@ class Config(dict):
             try:
                 self.update(yaml.safe_load(stream).copy())
             except yaml.YAMLError as e:
-                print(e)
+                self.logger.error(e)
         self.logger.debug(f'Loaded config from {self.path}')
         self.init_constants()
     
@@ -133,7 +133,7 @@ class Config(dict):
             try:
                 stream.write(yaml.safe_dump(self.copy()))
             except yaml.YAMLError as e:
-                print(e)
+                self.logger.error(e)
             self.logger.debug(f'Saved config to {self.path}')
     
 def rstring_to_rtuple(resolution:str):
