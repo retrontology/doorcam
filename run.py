@@ -21,6 +21,7 @@ def setup_logger(debug=False):
         logger.setLevel(DEBUG)
     else:
         logger.setLevel(INFO)
+    return logger
 
 def parse_args():
     parser = argparse.ArgumentParser()

@@ -8,7 +8,7 @@ class Camera():
 
     logger = Logger('doorcam.camera')
 
-    def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array):
+    def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array, update_callbacks:set=None):
         self.logger.debug(f'Initializing camera at index {index}')
         self.index = index
         self.resolution = resolution
@@ -20,31 +20,40 @@ class Camera():
         self.undistort_K = undistort_K
         self.undistort_D = undistort_D
         self.current_jpg = None
+        self.update_callbacks = update_callbacks
         self.open()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
         self.fps_thread = Thread(target=self.fps_loop, daemon=True)
         self.fps_thread.start()
-        self.logger.debug(f'Camera at index {index} is intialized!!!')
+        self.logger.debug(f'Camera at index {index} is intialized!')
+    
+    def add_callback(self, callback):
+        if self.update_callbacks != None:
+            self.update_callbacks.add(callback)
+        else:
+            self.update_callbacks = set((callback,))
+    
+    def remove_callback(self, callback):
+        if self.update_callbacks != None and callback in self.update_callbacks:
+            if len(self.update_callbacks == 1):
+                self.update_callbacks = None
+            else:
+                self.update_callbacks.remove(callback)
 
     def capture_loop(self):
-        checkpoint = time.time()
-        interval = 1.0/self.max_fps
-        ret, frame = self.cap.read()
         while True:
-            if ret:
-                self.current_jpg = frame
-                self.frame_count += 1
             try:
                 ret, frame = self.cap.read()
+                if ret:
+                    self.current_jpg = frame
+                    self.frame_count += 1
+                    if self.update_callbacks != None:
+                        for callback in self.update_callbacks:
+                            Thread(target=callback, daemon=True).start()
             except Exception as e:
                 self.logger.error(e)
                 time.sleep(1)
-            """ now = time.time()
-            while(now - checkpoint < interval):
-                time.sleep(0.001)
-                now = time.time()
-            checkpoint = now """
     
     def fps_loop(self):
         checkpoint = time.time()
