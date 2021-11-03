@@ -1,6 +1,13 @@
 # doorcam
 Raspberry Pi Peephole Camera
 
+## Installation
+```
+git clone https://github.com/retrontology/doorcam
+cd doorcam
+python3 -m pip install -r requirements.txt
+```
+
 ## Config
 - <b>analyzer</b>:
   - <b>contour_minimum_area</b>: Minimum contour area of difference between frames of the analyzer to trigger a detection event.
@@ -30,3 +37,14 @@ Raspberry Pi Peephole Camera
 - <b>stream</b>:
   - <b>ip</b>: The IP address of the desired network device to use for the MJPG server
   - <b>port</b>: The port to listen on for the MJPG server
+
+## Usage
+```
+usage: run.py [-h] [-c config.yaml] [-d] [-f]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -c config.yaml, --config config.yaml
+  -d, --debug
+  -f, --fps
+```
