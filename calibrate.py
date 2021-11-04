@@ -72,12 +72,8 @@ def calculate_K_D(point_dir, ishape, balance=1):
 
     print(f'{K} * {img_dim[0]} / {DIM[0]} = {K * img_dim[0] / DIM[0]}')
 
-    new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(K, D, DIM, np.eye(3), balance=balance)
-
-    print("DIM=" + str(img_dim))
-    print("K=np.array(" + str(K.tolist()) + ")")
-    print("new_K=np.array(" + str(new_K.tolist()) + ")")
-    print("D=np.array(" + str(D.tolist()) + ")")
+    print("K: " + str(K.tolist()))
+    print("D: " + str(D.tolist()))
 
 
 

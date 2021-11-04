@@ -2,15 +2,16 @@ from threading import Thread
 from doorscreen import *
 from doorcam import *
 import time
+from logging import Logger
 
-DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
-DEFAULT_DELTA_THRESHOLD = 5
-DEFAULT_CONTOUR_MIN_AREA = 5000
-DEFAULT_ANALYSIS_FPS = 5
+ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
 
 class Analyzer():
 
-    def __init__(self, cam: Camera, screen: Screen = None, max_fps=DEFAULT_ANALYSIS_FPS, delta_threshold=DEFAULT_DELTA_THRESHOLD, contour_min_area=DEFAULT_CONTOUR_MIN_AREA, undistort=True, undistort_balance=1):
+    logger = Logger('doorcam.analyzer')
+
+    def __init__(self, cam: Camera, screen: Screen, max_fps:int, delta_threshold:int, contour_min_area:int, undistort:bool, undistort_balance:float):
+        self.logger.debug(f'Intializing motion analyzer...')
         self.camera = cam
         self.screen = screen
         self.delta_threshold = delta_threshold
@@ -23,19 +24,20 @@ class Analyzer():
         self.analysis_fps_thread.start()
         self.analysis_thread = Thread(target=self.analysis_loop, daemon=True)
         self.analysis_thread.start()
-
+        self.logger.debug(f'Motion analyzer initialized@')
+        
     def analysis_loop(self):
         frame_average = None
         interval = 1.0/self.max_fps
         checkpoint = time.time()
         while True:
             try:
-                frame = cv2.imdecode(self.camera.current_jpg, DECODE_FLAGS)
+                frame = cv2.imdecode(self.camera.current_jpg, ANALYZER_DECODE_FLAGS)
                 if self.undistort:
                     frame = cv2.remap(frame, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
                 frame = cv2.GaussianBlur(frame, (21,21), 0)
             except Exception as e:
-                print(e)
+                self.logger.error(e)
                 continue
             if frame_average is None:
                 frame_average = frame.copy().astype('float')
@@ -46,9 +48,12 @@ class Analyzer():
             contours, hierarchy = cv2.findContours(frame_threshold.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             activate = False
             for contour in contours:
-                if cv2.contourArea(contour) > self.contour_min_area:
+                area = cv2.contourArea(contour)
+                if area > self.contour_min_area:
+                    self.logger.debug(f'Contour of {area} is above minimum area threshold of {self.contour_min_area}')
                     activate = True
             if activate and self.screen:
+                self.logger.info(f'Motion detected, activating screen')
                 self.screen.play_camera()
             self.frame_count += 1
             now = time.time()
@@ -69,6 +74,7 @@ class Analyzer():
             checkpoint = now
 
     def setup_undistort(self, undistort=True, undistort_balance=1):
+        self.logger.debug(f'Calculating distortion maps...')
         self.undistort = undistort
         undistort_DIM=self.camera.resolution
         if type(self.camera.undistort_K) is np.ndarray:
@@ -79,8 +85,6 @@ class Analyzer():
             undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([0.01, -0.01, 0.01, -0.01])
-        if type(self.camera.undistort_NK) is np.ndarray:
-            undistort_NK = self.camera.undistort_NK
-        else:
-            undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
+        undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
+        self.logger.debug(f'Distortion maps calculated!')

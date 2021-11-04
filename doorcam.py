@@ -2,16 +2,14 @@ import cv2
 import numpy as np
 from threading import Thread
 import time
-
-DEFAULT_INDEX=0
-DEFAULT_FOURCC=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-DEFAULT_RESOLUTION=(1920,1080)
-DEFAULT_MAX_FPS=30
-DEFAULT_K_SCALE=2
+from logging import Logger
 
 class Camera():
 
-    def __init__(self, index=DEFAULT_INDEX, resolution=DEFAULT_RESOLUTION, rotation=None, max_fps=DEFAULT_MAX_FPS, fourcc=DEFAULT_FOURCC, undistort_K=None, undistort_D=None, undistort_NK=None):
+    logger = Logger('doorcam.camera')
+
+    def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array, update_callbacks:set=None):
+        self.logger.debug(f'Initializing camera at index {index}')
         self.index = index
         self.resolution = resolution
         self.rotation = rotation
@@ -21,28 +19,41 @@ class Camera():
         self.fps = 0
         self.undistort_K = undistort_K
         self.undistort_D = undistort_D
-        self.undistort_NK = undistort_NK
         self.current_jpg = None
+        self.update_callbacks = update_callbacks
         self.open()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
         self.fps_thread = Thread(target=self.fps_loop, daemon=True)
         self.fps_thread.start()
+        self.logger.debug(f'Camera at index {index} is intialized!')
+    
+    def add_callback(self, callback):
+        if self.update_callbacks != None:
+            self.update_callbacks.add(callback)
+        else:
+            self.update_callbacks = set((callback,))
+    
+    def remove_callback(self, callback):
+        if self.update_callbacks != None and callback in self.update_callbacks:
+            if len(self.update_callbacks == 1):
+                self.update_callbacks = None
+            else:
+                self.update_callbacks.remove(callback)
 
     def capture_loop(self):
-        checkpoint = time.time()
-        interval = 1.0/self.max_fps
-        ret, frame = self.cap.read()
         while True:
-            if ret:
-                self.current_jpg = frame
-                self.frame_count += 1
-            ret, frame = self.cap.read()
-            """ now = time.time()
-            while(now - checkpoint < interval):
-                time.sleep(0.001)
-                now = time.time()
-            checkpoint = now """
+            try:
+                ret, frame = self.cap.read()
+                if ret:
+                    self.current_jpg = frame
+                    self.frame_count += 1
+                    if self.update_callbacks != None:
+                        for callback in self.update_callbacks:
+                            Thread(target=callback, daemon=True).start()
+            except Exception as e:
+                self.logger.error(e)
+                time.sleep(1)
     
     def fps_loop(self):
         checkpoint = time.time()

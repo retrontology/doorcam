@@ -3,20 +3,17 @@ import numpy as np
 from doorcam import *
 from evdev import InputDevice
 from select import select
+from logging import Logger
 
-DEFAULT_FRAMEBUFFER_DEVICE='/dev/fb0'
-DEFAULT_BACKLIGHT_DEVICE='/sys/class/backlight/rpi_backlight/bl_power'
-DEFAULT_TOUCH_DEVICE='/dev/input/event1'
-DEFAULT_COLOR_CONV=cv2.COLOR_BGR2BGR565
-DEFAULT_RESOLUTION=(480,800)
-DEFAULT_DTYPE = np.uint16
-DEFAULT_PERIOD = 10
-DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
+SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
 
-    def __init__(self, camera:Camera, resolution=DEFAULT_RESOLUTION, rotation=None, fbdev=DEFAULT_FRAMEBUFFER_DEVICE, bldev=DEFAULT_BACKLIGHT_DEVICE, touchdev=DEFAULT_TOUCH_DEVICE, color_conv=DEFAULT_COLOR_CONV, dtype=DEFAULT_DTYPE, undistort=True, undistort_balance=1):
+    logger = Logger('doorcam.screen')
+
+    def __init__(self, camera:Camera, resolution:tuple, rotation, fbdev:str, bldev:str, touchdev:str, color_conv, dtype, activation_period:int, undistort:bool, undistort_balance:float):
+        self.logger.debug(f'Initializing screen located at {fbdev} ...')
         self.camera = camera
         self.resolution = resolution
         self.rotation = rotation
@@ -25,17 +22,26 @@ class Screen():
         self.touchdev = touchdev
         self.dtype = dtype
         self.color_conv = color_conv
-        self.play_thread = None
+        self.activation_period = activation_period
         self.touch_thread = Thread(target=self.touch_loop, daemon=True)
         self.touch_thread.start()
         self.fps = 0
         self.fps_stop = False
         self.frame = None
         self.frame_count = 0
+        self.activate = True
+        self.frame_update = False
+        self.camera.add_callback(self.trigger_frame_update)
         self.setup_undistort(undistort, undistort_balance)
         self.turn_off()
+        self.fps_thread = Thread(target=self.fps_loop)
+        self.fps_thread.start()
+        self.play_thread = Thread(target=self.play_loop)
+        self.play_thread.start()
+        self.logger.debug(f'Screen located at {fbdev} initialized!')
     
     def setup_undistort(self, undistort=True, undistort_balance=1):
+        self.logger.debug(f'Calculating distortion maps...')
         self.undistort = undistort
         undistort_DIM=tuple([int(x/4) for x in self.camera.resolution])
         if type(self.camera.undistort_K) is np.ndarray:
@@ -47,18 +53,19 @@ class Screen():
             undistort_D = self.camera.undistort_D
         else:
             undistort_D = np.array([-0.01, 0.01, -0.01, 0.01])
-        if type(self.camera.undistort_NK) is np.ndarray:
-            undistort_NK = self.camera.undistort_NK/4
-            undistort_NK[2][2] = 1.0
-        else:
-            undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
+        undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
+        self.logger.debug(f'Distortion maps calculated!')
+
+    def trigger_frame_update(self):
+        self.frame_update = True
 
     def fb_blank(self, data = 0):
         blank = np.array([[data]], dtype=self.dtype)
         blank = np.repeat(blank, self.resolution[0], 1)
         blank = np.repeat(blank, self.resolution[1], 0)
         self.fb_write(blank.tobytes())
+        self.logger.debug(f'Screen blanked')
 
     def fb_write(self, data):
         with open(self.fbdev, 'wb') as fb:
@@ -69,7 +76,7 @@ class Screen():
             self.frame = self.process_image(image)
             self.fb_write(self.frame.tobytes())
         except Exception as e:
-            print(e)
+            self.logger.error(e)
 
     def bl_set(self, flag: bool):
         if flag:
@@ -80,15 +87,8 @@ class Screen():
             backlight.write(out)
     
     def play_camera(self):
-        if self.play_thread == None:
-            self.activate = False
-            self.play_thread = Thread(target=self.play_loop, daemon=True)
-            self.play_thread.start()
-            self.fps_stop = False
-            self.fps_thread = Thread(target=self.fps_loop, daemon=True)
-            self.fps_thread.start()
-        else:
-            self.activate = True
+        self.activate = True
+        self.logger.debug(f'Screen activated')
     
     def touch_loop(self):
         dev = InputDevice(self.touchdev)
@@ -96,6 +96,7 @@ class Screen():
             r,w,x = select([dev] ,[], [])
             for event in dev.read():
                 e = event
+            self.logger.debug('Screen touched')
             self.play_camera()
             time.sleep(0.1)
     
@@ -109,46 +110,29 @@ class Screen():
                 time.sleep(0.1)
                 now = time.time()
             checkpoint = now
-            if self.fps_stop:
-                self.fps_stop = False
-                self.fps_thread = None
-                break
-
-    """ def play_loop(self):
-        self.turn_on()
-        checkpoint = time.time()
-        interval = 1.0/self.camera.max_fps
-        while True:
-            self.fb_write_image(self.camera.current_jpg)
-            self.frame_count += 1
-            now = time.time()
-            while now - checkpoint < interval:
-                time.sleep(0.001)
-                now = time.time()
-            checkpoint = now """
-
+    
     def play_loop(self):
-        self.turn_on()
-        start = time.time()
-        now = time.time()
-        interval = 1.0/self.camera.max_fps
-        while now - start < DEFAULT_PERIOD:
-            if self.activate:
-                start = time.time()
-                self.activate = False
-            self.fb_write_image(self.camera.current_jpg)
-            self.frame_count += 1
+        while True:
+            while not self.activate:
+                time.sleep(0.1)
+            self.activate = False
             now = time.time()
-            int_start = now
-            while now - int_start < interval:
-                time.sleep(0.001)
+            start = now
+            self.turn_on()
+            while now - start < self.activation_period:
+                self.fb_write_image(self.camera.current_jpg)
+                self.frame_count += 1
+                while not self.frame_update:
+                    time.sleep(0.01)
+                self.frame_update = False
                 now = time.time()
-            int_start = now
-        self.turn_off()
-        self.play_thread = None
+                if self.activate:
+                    self.activate = False
+                    start = now
+            self.turn_off()
 
     def process_image(self, src):
-        image = cv2.imdecode(src, DECODE_FLAGS)
+        image = cv2.imdecode(src, SCREEN_DECODE_FLAGS)
         if self.undistort:
             image = cv2.remap(image, self.undistort_map1, self.undistort_map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         if self.rotation != None:
@@ -160,7 +144,9 @@ class Screen():
     def turn_off(self):
         self.fb_blank()
         self.bl_set(False)
+        self.logger.debug('Turned off')
     
     def turn_on(self):
         self.fb_blank()
         self.bl_set(True)
+        self.logger.debug('Turned on')
