@@ -44,7 +44,7 @@ class Capture():
             Thread(target=self.queue.dump(imgdir), daemon=True).start()
             while now - start < self.postroll:
                 while not self.frame_update:
-                    time.sleep(0.01)
+                    time.sleep(0.001)
                 self.frame_update = False
                 now = time.time()
                 filename = datetime.datetime.fromtimestamp(now).strftime(TIME_FORMAT)
