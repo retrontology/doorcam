@@ -63,20 +63,30 @@ class Capture():
 
     def post_process(self, path):
         imgpath = os.path.join(path, 'images')
-        if self.timestamp:
-            for file in os.listdir(imgpath):
-                if file[-4:].lower() == '.jpg':
-                    try:
-                        image = cv2.imread(os.path.join(imgpath, file), flags=cv2.IMREAD_COLOR)
-                        timestamp = datetime.datetime.strptime(file[:-4], TIME_FORMAT)
+        images = []
+        for filename in os.listdir(imgpath):
+            if filename[-4:].lower() == '.jpg':
+                images.append(filename)
+        if len(images) > 0 and (self.timestamp or self.video_encode):
+            images.sort()
+            if self.video_encode:
+                video_file = os.path.basename(path) + '.mp4'
+                video_file = os.path.join(path, video_file)
+                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'mp4v'), self.camera.max_fps, self.camera.resolution)
+            for filename in images:
+                fullpath = os.path.join(imgpath, filename)
+                try:
+                    image = cv2.imread(fullpath, flags=cv2.IMREAD_COLOR)
+                    if self.timestamp:
+                        timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                         image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))
-                        cv2.imwrite(os.path.join(imgpath, file), image)
-                    except Exception as e:
-                        self.logger.error(e)
-        if self.video_encode:
-            for file in os.listdir(imgpath):
-                if file[-4:].lower() == '.jpg':
-                    pass
+                        cv2.imwrite(fullpath, image)
+                    if self.video_encode:
+                        video_writer.write(image)
+                except Exception as e:
+                    self.logger.error(e)
+            if self.video_encode:
+                video_writer.release()
 
     def trigger_capture(self):
         self.activate = True
