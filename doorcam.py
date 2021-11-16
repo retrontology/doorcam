@@ -50,7 +50,7 @@ class Camera():
                     self.frame_count += 1
                     if self.update_callbacks != None:
                         for callback in self.update_callbacks:
-                            Thread(target=callback, daemon=True).start()
+                            Thread(target=callback, args=(frame, ), daemon=True).start()
             except Exception as e:
                 self.logger.error(e)
                 time.sleep(1)

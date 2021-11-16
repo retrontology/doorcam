@@ -10,16 +10,16 @@ class Analyzer():
 
     logger = Logger('doorcam.analyzer')
 
-    def __init__(self, cam: Camera, screen: Screen, max_fps:int, delta_threshold:int, contour_min_area:int, undistort:bool, undistort_balance:float):
+    def __init__(self, cam: Camera, max_fps:int, delta_threshold:int, contour_min_area:int, undistort:bool, undistort_balance:float, callbacks:set=None):
         self.logger.debug(f'Intializing motion analyzer...')
         self.camera = cam
-        self.screen = screen
         self.delta_threshold = delta_threshold
-        self.contour_min_area=contour_min_area
+        self.contour_min_area = contour_min_area
         self.frame_count = 0
         self.fps = 0
         self.max_fps = max_fps
         self.setup_undistort(undistort, undistort_balance)
+        self.callbacks = callbacks
         self.analysis_fps_thread = Thread(target=self.analysis_fps_loop, daemon=True)
         self.analysis_fps_thread.start()
         self.analysis_thread = Thread(target=self.analysis_loop, daemon=True)
@@ -52,9 +52,11 @@ class Analyzer():
                 if area > self.contour_min_area:
                     self.logger.debug(f'Contour of {area} is above minimum area threshold of {self.contour_min_area}')
                     activate = True
-            if activate and self.screen:
-                self.logger.info(f'Motion detected, activating screen')
-                self.screen.play_camera()
+            if activate:
+                self.logger.info(f'Motion detected, triggering callbacks')
+                if self.callbacks != None:
+                    for callback in self.callbacks:
+                        Thread(target=callback, daemon=True).start()
             self.frame_count += 1
             now = time.time()
             while(now - checkpoint < interval):
@@ -72,6 +74,19 @@ class Analyzer():
                 time.sleep(0.1)
                 now = time.time()
             checkpoint = now
+
+    def add_callback(self, callback):
+        if self.callbacks != None:
+            self.callbacks.add(callback)
+        else:
+            self.callbacks = set((callback,))
+    
+    def remove_callback(self, callback):
+        if self.callbacks != None and callback in self.callbacks:
+            if len(self.callbacks == 1):
+                self.callbacks = None
+            else:
+                self.callbacks.remove(callback)
 
     def setup_undistort(self, undistort=True, undistort_balance=1):
         self.logger.debug(f'Calculating distortion maps...')

@@ -57,7 +57,7 @@ class Screen():
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
         self.logger.debug(f'Distortion maps calculated!')
 
-    def trigger_frame_update(self):
+    def trigger_frame_update(self, image):
         self.frame_update = True
 
     def fb_blank(self, data = 0):

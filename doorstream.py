@@ -17,7 +17,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
         self.camera.add_callback(self.trigger_frame_update)
         super().__init__(*args, **kwargs)
 
-    def trigger_frame_update(self):
+    def trigger_frame_update(self, image):
         self.frame_update = True
 
     def do_GET(self):

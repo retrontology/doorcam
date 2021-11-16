@@ -59,12 +59,12 @@ def main():
     screen.play_camera()
     analyzer = Analyzer(
         cam,
-        screen,
         config['analyzer']['max_fps'],
         config['analyzer']['delta_threshold'],
         config['analyzer']['contour_minimum_area'],
         config['analyzer']['undistort'],
-        config['analyzer']['undistort_balance']
+        config['analyzer']['undistort_balance'],
+        set((screen.play_camera,))
     )
     stream_handler = partial(MJPGHandler, cam)
     server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
