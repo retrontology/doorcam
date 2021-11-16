@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 from logging import Logger
 
-DEFAULT_ANALYSIS_DELTA_THRESHOLD=5
-DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=5000
+DEFAULT_ANALYSIS_DELTA_THRESHOLD=10
+DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=10000
 DEFAULT_ANALYSIS_MAX_FPS=5
 DEFAULT_ANALYSIS_UNDISTORT=True
 DEFAULT_ANALYSIS_UNDISTORT_BALANCE=1.0
@@ -28,6 +28,12 @@ DEFAULT_TOUCH_DEVICE='/dev/input/event1'
 DEFAULT_SCREEN_ACTIVATION_PERIOD = 10
 DEFAULT_STREAM_IP = '0.0.0.0'
 DEFAULT_STREAM_PORT = 8080
+DEFAULT_CAPTURE_ENABLE = True
+DEFAULT_CAPTURE_PREROLL = 5
+DEFAULT_CAPTURE_POSTROLL = 5
+DEFAULT_CAPTURE_PATH = 'capture'
+DEFAULT_CAPTURE_TIMESTAMP = True
+DEFAULT_CAPTURE_VIDEO_ENCODE = True
 
 class Config(dict):
 
@@ -40,9 +46,8 @@ class Config(dict):
         self.load_defaults()
         if os.path.isfile(path):
             self.load()
-        else:
-            self.save()
-            self.init_constants()
+        self.save()
+        self.init_constants()
         self.logger.debug('Config from file {path} has been initialized!')
 
     def init_constants(self):
@@ -88,7 +93,6 @@ class Config(dict):
             except yaml.YAMLError as e:
                 self.logger.error(e)
         self.logger.debug(f'Loaded config from {self.path}')
-        self.init_constants()
     
     def load_defaults(self):
         analysis_configs = {
@@ -127,6 +131,15 @@ class Config(dict):
             'port': DEFAULT_STREAM_PORT
         }
         self.setdefault('stream', stream_configs)
+        capture_configs = {
+            'enable': DEFAULT_CAPTURE_ENABLE,
+            'preroll': DEFAULT_CAPTURE_PREROLL,
+            'postroll': DEFAULT_CAPTURE_POSTROLL,
+            'path': DEFAULT_CAPTURE_PATH,
+            'timestamp': DEFAULT_CAPTURE_TIMESTAMP,
+            'video_encode': DEFAULT_CAPTURE_VIDEO_ENCODE
+        }
+        self.setdefault('capture', capture_configs)
     
     def save(self):
         with open(self.path, 'w') as stream:
