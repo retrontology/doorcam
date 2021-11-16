@@ -1,6 +1,5 @@
 from doorcam import Camera
 from threading import Thread
-from queue import SimpleQueue
 import time
 import datetime
 import os
