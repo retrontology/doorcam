@@ -12,14 +12,15 @@ from functools import partial
 import argparse
 from logging import getLogger, StreamHandler, Formatter, DEBUG, INFO
 from systemd import journal
+import psutil
 from doorcapture import *
 
 def setup_logger(debug=False):
     logger = getLogger('doorcam')
     stream_formatter = Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
     journald_handler = journal.JournaldLogHandler()
-    journald_handler.setFormatter(stream_formatter)
     stream_handler = StreamHandler()
+    stream_handler.setFormatter(stream_formatter)
     if debug:
         logger.setLevel(DEBUG)
         journald_handler.setLevel(DEBUG)
@@ -28,8 +29,10 @@ def setup_logger(debug=False):
         logger.setLevel(INFO)
         journald_handler.setLevel(INFO)
         stream_handler.setLevel(INFO)
-    logger.addHandler(journald_handler)
-    logger.addHandler(stream_handler)
+    if psutil.Process(os.getpid()).ppid() == 1:
+        logger.addHandler(journald_handler)
+    else:
+        logger.addHandler(stream_handler)
     return logger
 
 def parse_args():
@@ -42,7 +45,6 @@ def parse_args():
 def main():
     args = parse_args()
     config = Config(args.config)
-    print(args.debug)
     logger = setup_logger(args.debug)
     cam = Camera(
         config['camera']['index'], 
