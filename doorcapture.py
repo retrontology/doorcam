@@ -14,13 +14,14 @@ class Capture():
 
     logger = getLogger('doorcam.capture')
 
-    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, video_encode):
+    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, video_encode, keep_images):
         self.camera = camera
         self.preroll = preroll_time
         self.postroll = postroll_time
         self.path = os.path.abspath(capture_path)
         self.timestamp = timestamp
         self.video_encode = video_encode
+        self.keep_images = keep_images
         if not os.path.isdir(self.path):
             os.mkdir(self.path)
         self.activate = False
@@ -80,13 +81,26 @@ class Capture():
                     if self.timestamp:
                         timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                         image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))
-                        cv2.imwrite(fullpath, image)
+                        if self.keep_images:
+                            cv2.imwrite(fullpath, image)
                     if self.video_encode:
                         video_writer.write(image)
+                    if not self.keep_images:
+                        try:
+                            os.remove(fullpath)
+                        except Exception as e:
+                            self.logger.error(e)
                 except Exception as e:
                     self.logger.error(e)
             if self.video_encode:
                 video_writer.release()
+            if not self.keep_images:
+                try:
+                    os.rmdir(imgpath)
+                except Exception as e:
+                    self.logger.error(e)
+                
+
 
     def trigger_capture(self):
         self.activate = True

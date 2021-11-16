@@ -15,6 +15,7 @@ camera:
   rotation: null
 capture:
   enable: true
+  keep_images: false
   path: capture
   postroll: 5
   preroll: 5

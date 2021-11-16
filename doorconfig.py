@@ -29,6 +29,7 @@ DEFAULT_SCREEN_ACTIVATION_PERIOD = 10
 DEFAULT_STREAM_IP = '0.0.0.0'
 DEFAULT_STREAM_PORT = 8080
 DEFAULT_CAPTURE_ENABLE = True
+DEFAULT_CAPTURE_KEEP_IMAGES = False
 DEFAULT_CAPTURE_PREROLL = 5
 DEFAULT_CAPTURE_POSTROLL = 5
 DEFAULT_CAPTURE_PATH = 'capture'
@@ -133,6 +134,7 @@ class Config(dict):
         self.setdefault('stream', stream_configs)
         capture_configs = {
             'enable': DEFAULT_CAPTURE_ENABLE,
+            'keep_images': DEFAULT_CAPTURE_KEEP_IMAGES,
             'preroll': DEFAULT_CAPTURE_PREROLL,
             'postroll': DEFAULT_CAPTURE_POSTROLL,
             'path': DEFAULT_CAPTURE_PATH,

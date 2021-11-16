@@ -76,7 +76,8 @@ def main():
             config['capture']['postroll'],
             config['capture']['path'],
             config['capture']['timestamp'],
-            config['capture']['video_encode']
+            config['capture']['video_encode'],
+            config['capture']['keep_images']
         )
         analyzer_callbacks.add(capture.trigger_capture)
     analyzer = Analyzer(
