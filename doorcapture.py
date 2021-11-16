@@ -26,11 +26,13 @@ class Capture():
             os.mkdir(self.path)
         self.activate = False
         self.queue = CaptureQueue(self.camera, self.preroll)
+        #add postprocessing queue
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
         self.camera.add_callback(self.trigger_frame_update)
 
     def capture_loop(self):
+        #overhaul this and integrate it into the queue class for continuous frames?
         self.frame_update = False
         now = time.time()
         while True:
