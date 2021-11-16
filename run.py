@@ -63,7 +63,9 @@ def main():
             cam,
             config['capture']['preroll'],
             config['capture']['postroll'],
-            config['capture']['path']
+            config['capture']['path'],
+            config['capture']['timestamp'],
+            config['capture']['video_encode']
         )
         analyzer_callbacks.add(capture.trigger_capture)
     analyzer = Analyzer(

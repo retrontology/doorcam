@@ -10,11 +10,13 @@ TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 
 class Capture():
 
-    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path):
+    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, video_encode):
         self.camera = camera
         self.preroll = preroll_time
         self.postroll = postroll_time
         self.path = os.path.abspath(capture_path)
+        self.timestamp = timestamp
+        self.video_encode = video_encode
         if not os.path.isdir(self.path):
             os.mkdir(self.path)
         self.activate = False
@@ -56,7 +58,10 @@ class Capture():
             Thread(target=self.post_process, args=(dirname,), daemon= True).start()
 
     def post_process(self, path):
-        pass
+        if self.timestamp:
+            pass
+        if self.video_encode:
+            pass
 
     def trigger_capture(self):
         self.activate = True
