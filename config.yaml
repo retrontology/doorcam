@@ -24,6 +24,11 @@ screen:
   touch_device: /dev/input/event1
   undistort: true
   undistort_balance: 1.0
+capture:
+  enable: true
+  preroll: 5
+  postroll: 5
+  path: capture
 stream:
   ip: 0.0.0.0
   port: 8080

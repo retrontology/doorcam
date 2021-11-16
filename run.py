@@ -12,6 +12,7 @@ from functools import partial
 import argparse
 from logging import Logger, StreamHandler, DEBUG, INFO
 from systemd import journal
+from doorcapture import *
 
 def setup_logger(debug=False):
     logger = Logger('doorcam')
@@ -56,7 +57,15 @@ def main():
         config['screen']['undistort'], 
         config['screen']['undistort_balance']
     )
-    screen.play_camera()
+    analyzer_callbacks = set((screen.play_camera, ))
+    if config['capture']['enable']:
+        capture = Capture(
+            cam,
+            config['capture']['preroll'],
+            config['capture']['postroll'],
+            config['capture']['path']
+        )
+        analyzer_callbacks.add(capture.trigger_capture)
     analyzer = Analyzer(
         cam,
         config['analyzer']['max_fps'],
@@ -64,7 +73,7 @@ def main():
         config['analyzer']['contour_minimum_area'],
         config['analyzer']['undistort'],
         config['analyzer']['undistort_balance'],
-        set((screen.play_camera,))
+        analyzer_callbacks
     )
     stream_handler = partial(MJPGHandler, cam)
     server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
