@@ -3,14 +3,14 @@ import numpy as np
 from doorcam import *
 from evdev import InputDevice
 from select import select
-from logging import Logger
+from logging import getLogger
 
 SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
 
-    logger = Logger('doorcam.screen')
+    logger = getLogger('doorcam.screen')
 
     def __init__(self, camera:Camera, resolution:tuple, rotation, fbdev:str, bldev:str, touchdev:str, color_conv, dtype, activation_period:int, undistort:bool, undistort_balance:float):
         self.logger.debug(f'Initializing screen located at {fbdev} ...')

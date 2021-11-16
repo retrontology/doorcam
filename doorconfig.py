@@ -2,7 +2,7 @@ import yaml
 import os
 import cv2
 import numpy as np
-from logging import Logger
+from logging import getLogger
 
 DEFAULT_ANALYSIS_DELTA_THRESHOLD=10
 DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=10000
@@ -37,7 +37,7 @@ DEFAULT_CAPTURE_VIDEO_ENCODE = True
 
 class Config(dict):
 
-    logger = Logger('doorcam.config')
+    logger = getLogger('doorcam.config')
 
     def __init__(self, path, *args, **kwargs):
         self.logger.debug('Intializing config from file at {path}')

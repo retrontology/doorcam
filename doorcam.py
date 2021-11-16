@@ -6,9 +6,8 @@ from logging import Logger
 
 class Camera():
 
-    logger = Logger('doorcam.camera')
-
     def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array, update_callbacks:set=None):
+        self.logger = Logger('doorcam.camera')
         self.logger.debug(f'Initializing camera at index {index}')
         self.index = index
         self.resolution = resolution

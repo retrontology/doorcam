@@ -2,13 +2,13 @@ from threading import Thread
 from doorscreen import *
 from doorcam import *
 import time
-from logging import Logger
+from logging import getLogger
 
 ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
 
 class Analyzer():
 
-    logger = Logger('doorcam.analyzer')
+    logger = getLogger('doorcam.analyzer')
 
     def __init__(self, cam: Camera, max_fps:int, delta_threshold:int, contour_min_area:int, undistort:bool, undistort_balance:float, callbacks:set=None):
         self.logger.debug(f'Intializing motion analyzer...')
@@ -24,7 +24,7 @@ class Analyzer():
         self.analysis_fps_thread.start()
         self.analysis_thread = Thread(target=self.analysis_loop, daemon=True)
         self.analysis_thread.start()
-        self.logger.debug(f'Motion analyzer initialized@')
+        self.logger.debug(f'Motion analyzer initialized!')
         
     def analysis_loop(self):
         frame_average = None

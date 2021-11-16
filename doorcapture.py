@@ -5,10 +5,14 @@ import time
 import datetime
 import os
 import cv2
+from logging import getLogger
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
+TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
 
 class Capture():
+
+    logger = getLogger('doorcam.capture')
 
     def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, video_encode):
         self.camera = camera
@@ -58,10 +62,21 @@ class Capture():
             Thread(target=self.post_process, args=(dirname,), daemon= True).start()
 
     def post_process(self, path):
+        imgpath = os.path.join(path, 'images')
         if self.timestamp:
-            pass
+            for file in os.listdir(imgpath):
+                if file[-4:].lower() == '.jpg':
+                    try:
+                        image = cv2.imread(os.path.join(imgpath, file), flags=cv2.IMREAD_COLOR)
+                        timestamp = datetime.datetime.strptime(file[:-4], TIME_FORMAT)
+                        image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))
+                        cv2.imwrite(os.path.join(imgpath, file), image)
+                    except Exception as e:
+                        self.logger.error(e)
         if self.video_encode:
-            pass
+            for file in os.listdir(imgpath):
+                if file[-4:].lower() == '.jpg':
+                    pass
 
     def trigger_capture(self):
         self.activate = True
