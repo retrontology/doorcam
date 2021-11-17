@@ -31,7 +31,6 @@ class Capture():
         self.camera.add_callback(self.trigger_frame_update)
 
     def capture_loop(self):
-        #overhaul this and integrate it into the queue class for continuous frames?
         self.frame_update = False
         now = time.time()
         while True:
@@ -47,7 +46,7 @@ class Capture():
             imgdir = os.path.join(dirname, 'images')
             if not os.path.isdir(imgdir):
                 os.mkdir(imgdir)
-            Thread(target=self.queue.dump(imgdir), daemon=True).start()
+            preroll = self.queue.queue.copy()
             while now - start < self.postroll:
                 while not self.frame_update:
                     time.sleep(0.001)
@@ -61,6 +60,13 @@ class Capture():
                 if self.activate:
                     self.activate = False
                     start = now
+            self.logger.debug(f'queue length: {len(preroll)} | first: {datetime.datetime.fromtimestamp(preroll[0][0]).strftime(TIME_FORMAT)} | last: {datetime.datetime.fromtimestamp(preroll[-1][0]).strftime(TIME_FORMAT)}')
+            for timestamp, image in preroll:
+                filename = datetime.datetime.fromtimestamp(timestamp).strftime(TIME_FORMAT)
+                filename = os.path.join(imgdir, filename)
+                filename = filename + '.jpg'
+                with open(filename, 'wb') as out:
+                    out.write(image)
             Thread(target=self.post_process, args=(dirname,), daemon= True).start()
 
     def post_process(self, path):
@@ -100,8 +106,6 @@ class Capture():
                     os.rmdir(imgpath)
                 except Exception as e:
                     self.logger.error(e)
-                
-
 
     def trigger_capture(self):
         self.activate = True
@@ -110,6 +114,8 @@ class Capture():
         self.frame_update = True
 
 class CaptureQueue():
+
+    logger = getLogger('doorcam.capture.queue')
 
     def __init__(self, camera: Camera, preroll_time):
         self.camera = camera
@@ -131,12 +137,3 @@ class CaptureQueue():
         now = time.time()
         self.trim(now)
         self.queue.append((now, image))
-    
-    def dump(self, path):
-        export = self.queue.copy()
-        for timestamp, image in export:
-            filename = datetime.datetime.fromtimestamp(timestamp).strftime(TIME_FORMAT)
-            filename = os.path.join(path, filename)
-            filename = filename + '.jpg'
-            with open(filename, 'wb') as out:
-                out.write(image)
