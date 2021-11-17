@@ -1,6 +1,6 @@
 analyzer:
-  contour_minimum_area: 5000
-  delta_threshold: 5
+  contour_minimum_area: 10000
+  delta_threshold: 10
   max_fps: 5
   undistort: true
   undistort_balance: 1.0
@@ -13,6 +13,15 @@ camera:
   max_fps: 30
   resolution: 1920x1080
   rotation: null
+capture:
+  enable: true
+  keep_images: false
+  path: capture
+  postroll: 5
+  preroll: 5
+  rotation: ROTATE_90_COUNTERCLOCKWISE
+  timestamp: true
+  video_encode: true
 screen:
   activation_period: 10
   backlight_device: /sys/class/backlight/rpi_backlight/bl_power

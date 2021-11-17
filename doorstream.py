@@ -3,13 +3,14 @@ import numpy as np
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from doorcam import *
+from logging import getLogger
 
 class MJPGServer(ThreadingMixIn, HTTPServer):
     pass
 
 class MJPGHandler(BaseHTTPRequestHandler):
 
-    logger = Logger('doorcam.stream')
+    logger = getLogger('doorcam.stream')
 
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera
@@ -17,7 +18,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
         self.camera.add_callback(self.trigger_frame_update)
         super().__init__(*args, **kwargs)
 
-    def trigger_frame_update(self):
+    def trigger_frame_update(self, image):
         self.frame_update = True
 
     def do_GET(self):

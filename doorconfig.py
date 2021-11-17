@@ -2,10 +2,10 @@ import yaml
 import os
 import cv2
 import numpy as np
-from logging import Logger
+from logging import getLogger
 
-DEFAULT_ANALYSIS_DELTA_THRESHOLD=5
-DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=5000
+DEFAULT_ANALYSIS_DELTA_THRESHOLD=10
+DEFAULT_ANALYSIS_CONTOUR_MIN_AREA=10000
 DEFAULT_ANALYSIS_MAX_FPS=5
 DEFAULT_ANALYSIS_UNDISTORT=True
 DEFAULT_ANALYSIS_UNDISTORT_BALANCE=1.0
@@ -28,10 +28,18 @@ DEFAULT_TOUCH_DEVICE='/dev/input/event1'
 DEFAULT_SCREEN_ACTIVATION_PERIOD = 10
 DEFAULT_STREAM_IP = '0.0.0.0'
 DEFAULT_STREAM_PORT = 8080
+DEFAULT_CAPTURE_ENABLE = True
+DEFAULT_CAPTURE_KEEP_IMAGES = False
+DEFAULT_CAPTURE_PREROLL = 5
+DEFAULT_CAPTURE_POSTROLL = 5
+DEFAULT_CAPTURE_PATH = 'capture'
+DEFAULT_CAPTURE_ROTATION='ROTATE_90_COUNTERCLOCKWISE'
+DEFAULT_CAPTURE_TIMESTAMP = True
+DEFAULT_CAPTURE_VIDEO_ENCODE = True
 
 class Config(dict):
 
-    logger = Logger('doorcam.config')
+    logger = getLogger('doorcam.config')
 
     def __init__(self, path, *args, **kwargs):
         self.logger.debug('Intializing config from file at {path}')
@@ -40,9 +48,8 @@ class Config(dict):
         self.load_defaults()
         if os.path.isfile(path):
             self.load()
-        else:
-            self.save()
-            self.init_constants()
+        self.save()
+        self.init_constants()
         self.logger.debug('Config from file {path} has been initialized!')
 
     def init_constants(self):
@@ -59,6 +66,10 @@ class Config(dict):
         if type(self['camera']['D']) == str:
             self['camera']['D'] = yaml.safe_load(self['camera']['D'])
         self['camera']['D'] = np.array(self['camera']['D'])
+        if self['capture']['rotation'] is None:
+            self['capture']['rotation_const'] = None
+        else:
+            self['capture']['rotation_const'] = cstring_to_cvconstant(self['capture']['rotation'])
         self['screen']['resolution'] = rstring_to_rtuple(self['screen']['resolution'])
         if self['screen']['rotation'] is None:
             self['screen']['rotation_const'] = None
@@ -75,6 +86,7 @@ class Config(dict):
         self['camera']['K'] = str(self['camera']['K'].tolist())
         self['camera']['D'] = str(self['camera']['D'].tolist())
         self['screen']['resolution'] = rtuple_to_rstring(self['screen']['resolution'])
+        del self['capture']['rotation_const']
         del self['screen']['rotation_const']
         del self['screen']['color_conv_const']
         del self['screen']['dtype_np']
@@ -88,7 +100,6 @@ class Config(dict):
             except yaml.YAMLError as e:
                 self.logger.error(e)
         self.logger.debug(f'Loaded config from {self.path}')
-        self.init_constants()
     
     def load_defaults(self):
         analysis_configs = {
@@ -127,6 +138,17 @@ class Config(dict):
             'port': DEFAULT_STREAM_PORT
         }
         self.setdefault('stream', stream_configs)
+        capture_configs = {
+            'enable': DEFAULT_CAPTURE_ENABLE,
+            'keep_images': DEFAULT_CAPTURE_KEEP_IMAGES,
+            'preroll': DEFAULT_CAPTURE_PREROLL,
+            'postroll': DEFAULT_CAPTURE_POSTROLL,
+            'path': DEFAULT_CAPTURE_PATH,
+            'rotation': DEFAULT_CAPTURE_ROTATION,
+            'timestamp': DEFAULT_CAPTURE_TIMESTAMP,
+            'video_encode': DEFAULT_CAPTURE_VIDEO_ENCODE
+        }
+        self.setdefault('capture', capture_configs)
     
     def save(self):
         with open(self.path, 'w') as stream:

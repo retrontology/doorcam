@@ -10,17 +10,29 @@ from doorconfig import *
 import time
 from functools import partial
 import argparse
-from logging import Logger, StreamHandler, DEBUG, INFO
+from logging import getLogger, StreamHandler, Formatter, DEBUG, INFO
 from systemd import journal
+import psutil
+from doorcapture import *
 
 def setup_logger(debug=False):
-    logger = Logger('doorcam')
-    logger.addHandler(journal.JournaldLogHandler())
-    logger.addHandler(StreamHandler())
+    logger = getLogger('doorcam')
+    stream_formatter = Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+    journald_handler = journal.JournaldLogHandler()
+    stream_handler = StreamHandler()
+    stream_handler.setFormatter(stream_formatter)
     if debug:
         logger.setLevel(DEBUG)
+        journald_handler.setLevel(DEBUG)
+        stream_handler.setLevel(DEBUG)
     else:
         logger.setLevel(INFO)
+        journald_handler.setLevel(INFO)
+        stream_handler.setLevel(INFO)
+    if psutil.Process(os.getpid()).ppid() == 1:
+        logger.addHandler(journald_handler)
+    else:
+        logger.addHandler(stream_handler)
     return logger
 
 def parse_args():
@@ -56,15 +68,27 @@ def main():
         config['screen']['undistort'], 
         config['screen']['undistort_balance']
     )
-    screen.play_camera()
+    analyzer_callbacks = set((screen.play_camera, ))
+    if config['capture']['enable']:
+        capture = Capture(
+            cam,
+            config['capture']['preroll'],
+            config['capture']['postroll'],
+            config['capture']['path'],
+            config['capture']['timestamp'],
+            config['capture']['rotation_const'],
+            config['capture']['video_encode'],
+            config['capture']['keep_images']
+        )
+        analyzer_callbacks.add(capture.trigger_capture)
     analyzer = Analyzer(
         cam,
-        screen,
         config['analyzer']['max_fps'],
         config['analyzer']['delta_threshold'],
         config['analyzer']['contour_minimum_area'],
         config['analyzer']['undistort'],
-        config['analyzer']['undistort_balance']
+        config['analyzer']['undistort_balance'],
+        analyzer_callbacks
     )
     stream_handler = partial(MJPGHandler, cam)
     server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
