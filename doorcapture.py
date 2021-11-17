@@ -25,7 +25,9 @@ class Capture():
             os.mkdir(self.path)
         self.activate = False
         self.queue = CaptureQueue(self.camera, self.preroll)
-        #add postprocessing queue
+        self.post_process_queue = []
+        self.post_process_thread = Thread(target=self.post_process_loop, daemon=True)
+        self.post_process_thread.start()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
         self.camera.add_callback(self.trigger_frame_update)
@@ -60,14 +62,22 @@ class Capture():
                 if self.activate:
                     self.activate = False
                     start = now
-            self.logger.debug(f'queue length: {len(preroll)} | first: {datetime.datetime.fromtimestamp(preroll[0][0]).strftime(TIME_FORMAT)} | last: {datetime.datetime.fromtimestamp(preroll[-1][0]).strftime(TIME_FORMAT)}')
             for timestamp, image in preroll:
                 filename = datetime.datetime.fromtimestamp(timestamp).strftime(TIME_FORMAT)
                 filename = os.path.join(imgdir, filename)
                 filename = filename + '.jpg'
                 with open(filename, 'wb') as out:
                     out.write(image)
-            Thread(target=self.post_process, args=(dirname,), daemon= True).start()
+            self.post_process_queue.append(dirname)
+
+    def post_process_loop(self):
+        while True:
+            while len(self.post_process_queue) == 0:
+                time.sleep(1)
+            try:
+                self.post_process(self.post_process_queue.pop(0))
+            except Exception as e:
+                self.logger.error(e)
 
     def post_process(self, path):
         imgpath = os.path.join(path, 'images')
