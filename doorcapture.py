@@ -43,6 +43,7 @@ class Capture():
             start = now
             dirname = datetime.datetime.fromtimestamp(now).strftime(TIME_FORMAT)
             dirname = os.path.join(self.path, dirname)
+            self.logger.info(f'Capturing event and storing images at {dirname}')
             if not os.path.isdir(dirname):
                 os.mkdir(dirname)
             imgdir = os.path.join(dirname, 'images')
@@ -80,6 +81,7 @@ class Capture():
                 self.logger.error(e)
 
     def post_process(self, path):
+        self.logger.debug(f'Post-processing images located at: {path}')
         imgpath = os.path.join(path, 'images')
         images = []
         for filename in os.listdir(imgpath):
@@ -111,6 +113,7 @@ class Capture():
                     self.logger.error(e)
             if self.video_encode:
                 video_writer.release()
+                self.logger.info(f'Video of {path} encoded and saved to {video_file}')
             if not self.keep_images:
                 try:
                     os.rmdir(imgpath)
