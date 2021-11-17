@@ -76,6 +76,7 @@ def main():
             config['capture']['postroll'],
             config['capture']['path'],
             config['capture']['timestamp'],
+            config['capture']['rotation_const'],
             config['capture']['video_encode'],
             config['capture']['keep_images']
         )

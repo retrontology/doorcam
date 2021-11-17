@@ -19,6 +19,7 @@ capture:
   path: capture
   postroll: 5
   preroll: 5
+  rotation: ROTATE_90_COUNTERCLOCKWISE
   timestamp: true
   video_encode: true
 screen:

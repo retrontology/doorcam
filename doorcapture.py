@@ -13,11 +13,12 @@ class Capture():
 
     logger = getLogger('doorcam.capture')
 
-    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, video_encode, keep_images):
+    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, rotation, video_encode, keep_images):
         self.camera = camera
         self.preroll = preroll_time
         self.postroll = postroll_time
         self.path = os.path.abspath(capture_path)
+        self.rotation = rotation
         self.timestamp = timestamp
         self.video_encode = video_encode
         self.keep_images = keep_images
@@ -92,11 +93,16 @@ class Capture():
             if self.video_encode:
                 video_file = os.path.basename(path) + '.mp4'
                 video_file = os.path.join(path, video_file)
-                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'mp4v'), self.camera.max_fps, self.camera.resolution)
+                video_resolution = self.camera.resolution
+                if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
+                    video_resolution = (video_resolution[1],video_resolution[0])
+                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'mp4v'), self.camera.max_fps, video_resolution)
             for filename in images:
                 fullpath = os.path.join(imgpath, filename)
                 try:
                     image = cv2.imread(fullpath, flags=cv2.IMREAD_COLOR)
+                    if self.rotation != None:
+                        image = cv2.rotate(image, self.rotation)
                     if self.timestamp:
                         timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                         image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))

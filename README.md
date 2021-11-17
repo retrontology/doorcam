@@ -29,6 +29,7 @@ python3 -m pip install -r requirements.txt
   - <b>path</b>: Where the images will be saved
   - <b>postroll</b>: Amount of time in seconds to capture after the last frame where motion is detected
   - <b>preroll</b>: Amount of time in seconds to capture before the first frame where motion is detected
+  - <b>rotation</b>: The desired rotation to apply to the frames during post-processing.
   - <b>timestamp</b>: Whether or not to add timestamps to the saved images
   - <b>video_encode</b>: Whether or not to encode the saved images to a video file
 - <b>screen</b>:

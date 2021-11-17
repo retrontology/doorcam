@@ -33,6 +33,7 @@ DEFAULT_CAPTURE_KEEP_IMAGES = False
 DEFAULT_CAPTURE_PREROLL = 5
 DEFAULT_CAPTURE_POSTROLL = 5
 DEFAULT_CAPTURE_PATH = 'capture'
+DEFAULT_CAPTURE_ROTATION='ROTATE_90_COUNTERCLOCKWISE'
 DEFAULT_CAPTURE_TIMESTAMP = True
 DEFAULT_CAPTURE_VIDEO_ENCODE = True
 
@@ -65,6 +66,10 @@ class Config(dict):
         if type(self['camera']['D']) == str:
             self['camera']['D'] = yaml.safe_load(self['camera']['D'])
         self['camera']['D'] = np.array(self['camera']['D'])
+        if self['capture']['rotation'] is None:
+            self['capture']['rotation_const'] = None
+        else:
+            self['capture']['rotation_const'] = cstring_to_cvconstant(self['capture']['rotation'])
         self['screen']['resolution'] = rstring_to_rtuple(self['screen']['resolution'])
         if self['screen']['rotation'] is None:
             self['screen']['rotation_const'] = None
@@ -81,6 +86,7 @@ class Config(dict):
         self['camera']['K'] = str(self['camera']['K'].tolist())
         self['camera']['D'] = str(self['camera']['D'].tolist())
         self['screen']['resolution'] = rtuple_to_rstring(self['screen']['resolution'])
+        del self['capture']['rotation_const']
         del self['screen']['rotation_const']
         del self['screen']['color_conv_const']
         del self['screen']['dtype_np']
@@ -138,6 +144,7 @@ class Config(dict):
             'preroll': DEFAULT_CAPTURE_PREROLL,
             'postroll': DEFAULT_CAPTURE_POSTROLL,
             'path': DEFAULT_CAPTURE_PATH,
+            'rotation': DEFAULT_CAPTURE_ROTATION,
             'timestamp': DEFAULT_CAPTURE_TIMESTAMP,
             'video_encode': DEFAULT_CAPTURE_VIDEO_ENCODE
         }
