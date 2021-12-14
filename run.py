@@ -78,7 +78,9 @@ def main():
             config['capture']['timestamp'],
             config['capture']['rotation_const'],
             config['capture']['video_encode'],
-            config['capture']['keep_images']
+            config['capture']['keep_images'],
+            config['capture']['trim_old'],
+            config['capture']['trim_limit'],
         )
         analyzer_callbacks.add(capture.trigger_capture)
     analyzer = Analyzer(

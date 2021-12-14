@@ -35,6 +35,8 @@ DEFAULT_CAPTURE_POSTROLL = 5
 DEFAULT_CAPTURE_PATH = 'capture'
 DEFAULT_CAPTURE_ROTATION='ROTATE_90_COUNTERCLOCKWISE'
 DEFAULT_CAPTURE_TIMESTAMP = True
+DEFAULT_CAPTURE_TRIM_OLD = True
+DEFUALT_CAPTURE_TRIM_LIMIT = 30
 DEFAULT_CAPTURE_VIDEO_ENCODE = True
 
 class Config(dict):
@@ -146,6 +148,8 @@ class Config(dict):
             'path': DEFAULT_CAPTURE_PATH,
             'rotation': DEFAULT_CAPTURE_ROTATION,
             'timestamp': DEFAULT_CAPTURE_TIMESTAMP,
+            'trim_old': DEFAULT_CAPTURE_TRIM_OLD,
+            'trim_limit': DEFUALT_CAPTURE_TRIM_LIMIT,
             'video_encode': DEFAULT_CAPTURE_VIDEO_ENCODE
         }
         self.setdefault('capture', capture_configs)

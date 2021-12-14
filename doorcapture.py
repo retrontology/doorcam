@@ -3,17 +3,20 @@ from threading import Thread
 import time
 import datetime
 import os
+import shutil
 import cv2
 from logging import getLogger
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
+TRIM_DELAY = 86400
+TRIM_CHECK_INTERVAL = 300
 
 class Capture():
 
     logger = getLogger('doorcam.capture')
 
-    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, rotation, video_encode, keep_images):
+    def __init__(self, camera: Camera, preroll_time, postroll_time, capture_path, timestamp, rotation, video_encode, keep_images, trim_old, trim_limit):
         self.camera = camera
         self.preroll = preroll_time
         self.postroll = postroll_time
@@ -25,12 +28,17 @@ class Capture():
         if not os.path.isdir(self.path):
             os.mkdir(self.path)
         self.activate = False
+        self.trim_old = trim_old
+        self.trim_limit = trim_limit
         self.queue = CaptureQueue(self.camera, self.preroll)
         self.post_process_queue = []
         self.post_process_thread = Thread(target=self.post_process_loop, daemon=True)
         self.post_process_thread.start()
         self.capture_thread = Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
+        if self.trim_old:
+            self.trim_thread = Thread(target=self.trim_loop, daemon=True)
+            self.trim_thread.start()
         self.camera.add_callback(self.trigger_frame_update)
 
     def capture_loop(self):
@@ -80,6 +88,39 @@ class Capture():
                 self.post_process(self.post_process_queue.pop(0))
             except Exception as e:
                 self.logger.error(e)
+    
+    def trim_loop(self):
+        timestamp = time.time()
+        while True:
+            self.trim_dir()
+            timestamp += TRIM_DELAY
+            while time.time() < timestamp:
+                time.sleep(TRIM_CHECK_INTERVAL)
+
+    def trim_dir(self):
+        events = os.listdir(self.path)
+        valid_events = []
+        for event in events:
+            if os.path.isdir(event):
+                try:
+                    timestamp = datetime.datetime.strptime(os.path.basename(event), TIME_FORMAT)
+                    valid_events.append((event, timestamp))
+                except Exception as e:
+                    self.logger.debug(f'{event} could not be parsed as a timestamp, ignoring for trim')
+        if len(valid_events) > 0:
+            count = 0
+            now = datetime.datetime.now()
+            cutoff = now - datetime.timedelta(days=30)
+            for event in valid_events:
+                if event[1] < cutoff:
+                    self.logger.debug(f'Trimming {event[0]} as it is older than the specified date of {cutoff.strftime(TIME_FORMAT)}')
+                    try:
+                        shutil.rmtree(event[0])
+                        count += 1
+                    except Exception as e:
+                        self.logger.error(e)
+        else:
+            self.logger.debug('Did not detect any valid event directories while trimming')
 
     def post_process(self, path):
         self.logger.debug(f'Post-processing images located at: {path}')
