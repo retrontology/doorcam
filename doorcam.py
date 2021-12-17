@@ -2,12 +2,13 @@ import cv2
 import numpy as np
 from threading import Thread
 import time
-from logging import Logger
+import logging
 
 class Camera():
 
+    logger = logging.getLogger('doorcam.camera')
+
     def __init__(self, index:int, resolution:tuple, rotation, max_fps:int, fourcc, undistort_K:np.array, undistort_D:np.array, update_callbacks:set=None):
-        self.logger = Logger('doorcam.camera')
         self.logger.debug(f'Initializing camera at index {index}')
         self.index = index
         self.resolution = resolution
@@ -73,6 +74,7 @@ class Camera():
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self.cap.set(cv2.CAP_PROP_FPS, self.max_fps)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 4)
+        self.logger.info(f'HW ACCEL: {self.cap.get(cv2.CAP_PROP_HW_ACCELERATION)}')
         return self.cap
     
     def close(self):
