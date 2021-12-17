@@ -21,6 +21,8 @@ capture:
   preroll: 5
   rotation: ROTATE_90_COUNTERCLOCKWISE
   timestamp: true
+  trim_old: true
+  trim_limit: 30
   video_encode: true
 screen:
   activation_period: 10

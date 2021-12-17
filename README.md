@@ -31,6 +31,8 @@ python3 -m pip install -r requirements.txt
   - <b>preroll</b>: Amount of time in seconds to capture before the first frame where motion is detected
   - <b>rotation</b>: The desired rotation to apply to the frames during post-processing.
   - <b>timestamp</b>: Whether or not to add timestamps to the saved images
+  - <b>trim_old</b>: Whether or not to trim/delete old events.
+  - <b>trim_limit</b>: Amount of days of events you want to keep. All videos older than this window are trimmed/deleted if trim_old is `true`.
   - <b>video_encode</b>: Whether or not to encode the saved images to a video file
 - <b>screen</b>:
   - <b>activation_period</b>: How long in seconds you want the screen to activate for when either motion is detected or you touch the screen.
