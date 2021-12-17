@@ -74,7 +74,6 @@ class Camera():
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self.cap.set(cv2.CAP_PROP_FPS, self.max_fps)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 4)
-        self.logger.info(f'HW ACCEL: {self.cap.get(cv2.CAP_PROP_HW_ACCELERATION)}')
         return self.cap
     
     def close(self):
