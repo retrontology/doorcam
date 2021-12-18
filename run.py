@@ -70,19 +70,22 @@ def main():
     )
     analyzer_callbacks = set((screen.play_camera, ))
     if config['capture']['enable']:
-        capture = Capture(
-            cam,
-            config['capture']['preroll'],
-            config['capture']['postroll'],
-            config['capture']['path'],
-            config['capture']['timestamp'],
-            config['capture']['rotation_const'],
-            config['capture']['video_encode'],
-            config['capture']['keep_images'],
-            config['capture']['trim_old'],
-            config['capture']['trim_limit'],
-        )
-        analyzer_callbacks.add(capture.trigger_capture)
+        try:
+            capture = Capture(
+                cam,
+                config['capture']['preroll'],
+                config['capture']['postroll'],
+                config['capture']['path'],
+                config['capture']['timestamp'],
+                config['capture']['rotation_const'],
+                config['capture']['video_encode'],
+                config['capture']['keep_images'],
+                config['capture']['trim_old'],
+                config['capture']['trim_limit'],
+            )
+            analyzer_callbacks.add(capture.trigger_capture)
+        except Exception as e:
+            logger.error(e)
     analyzer = Analyzer(
         cam,
         config['analyzer']['max_fps'],
