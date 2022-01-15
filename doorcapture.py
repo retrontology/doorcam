@@ -101,6 +101,7 @@ class Capture():
         events = os.listdir(self.path)
         valid_events = []
         for event in events:
+            event = os.path.join(self.path, event)
             if os.path.isdir(event):
                 try:
                     timestamp = datetime.datetime.strptime(os.path.basename(event), TIME_FORMAT)
@@ -111,6 +112,7 @@ class Capture():
             count = 0
             now = datetime.datetime.now()
             cutoff = now - datetime.timedelta(days=30)
+            self.logger.debug(f'Checking for events before {cutoff.strftime(TIME_FORMAT)}')
             for event in valid_events:
                 if event[1] < cutoff:
                     self.logger.debug(f'Trimming {event[0]} as it is older than the specified date of {cutoff.strftime(TIME_FORMAT)}')
