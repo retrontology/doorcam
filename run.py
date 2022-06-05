@@ -18,7 +18,7 @@ from doorcapture import *
 def setup_logger(debug=False):
     logger = getLogger('doorcam')
     stream_formatter = Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-    journald_handler = journal.JournaldLogHandler()
+    journald_handler = journal.JournalHandler()
     stream_handler = StreamHandler()
     stream_handler.setFormatter(stream_formatter)
     if debug:
