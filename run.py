@@ -55,20 +55,21 @@ def main():
         config['camera']['K'], 
         config['camera']['D']
     )
-    screen = Screen(
-        cam, 
-        config['screen']['resolution'], 
-        config['screen']['rotation_const'], 
-        config['screen']['framebuffer_device'], 
-        config['screen']['backlight_device'], 
-        config['screen']['touch_device'], 
-        config['screen']['color_conv_const'], 
-        config['screen']['dtype_np'], 
-        config['screen']['activation_period'], 
-        config['screen']['undistort'], 
-        config['screen']['undistort_balance']
-    )
-    analyzer_callbacks = set((screen.play_camera, ))
+    if config['screen']['enable']:
+        screen = Screen(
+            cam, 
+            config['screen']['resolution'], 
+            config['screen']['rotation_const'], 
+            config['screen']['framebuffer_device'], 
+            config['screen']['backlight_device'], 
+            config['screen']['touch_device'], 
+            config['screen']['color_conv_const'], 
+            config['screen']['dtype_np'], 
+            config['screen']['activation_period'], 
+            config['screen']['undistort'], 
+            config['screen']['undistort_balance']
+        )
+        analyzer_callbacks = set((screen.play_camera, ))
     if config['capture']['enable']:
         try:
             capture = Capture(

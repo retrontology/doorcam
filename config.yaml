@@ -25,6 +25,7 @@ capture:
   trim_limit: 30
   video_encode: true
 screen:
+  enable: true
   activation_period: 10
   backlight_device: /sys/class/backlight/rpi_backlight/bl_power
   color_conv: COLOR_BGR2BGR565
