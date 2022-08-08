@@ -46,6 +46,7 @@ def main():
     args = parse_args()
     config = Config(args.config)
     logger = setup_logger(args.debug)
+    analyzer_callbacks = set()
     cam = Camera(
         config['camera']['index'], 
         config['camera']['resolution'], 
@@ -69,7 +70,7 @@ def main():
             config['screen']['undistort'], 
             config['screen']['undistort_balance']
         )
-        analyzer_callbacks = set((screen.play_camera, ))
+        analyzer_callbacks.add(screen.play_camera)
     if config['capture']['enable']:
         try:
             capture = Capture(
