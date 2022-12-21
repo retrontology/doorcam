@@ -11,7 +11,7 @@ import time
 from functools import partial
 import argparse
 from logging import getLogger, StreamHandler, Formatter, DEBUG, INFO
-from systemd import journal
+from cysystemd import journal
 import psutil
 from doorcapture import *
 
