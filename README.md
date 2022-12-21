@@ -1,12 +1,20 @@
 # doorcam
 Raspberry Pi Peephole Camera
 
+# Requirements
+This application requires OpenCV and the optional python package(s) it installs. You'll need to build and/or install that before you proceed with installing doorcam.
+
 ## Installation
-```
-git clone https://github.com/retrontology/doorcam
-cd doorcam
-python3 -m pip install -r requirements.txt
-```
+1. Install the requirements listed above
+2. Clone the repo
+   ```
+   git clone https://github.com/retrontology/doorcam
+   ```
+3. Install the python requirements
+   ```
+   cd doorcam
+   python3 -m pip install -r requirements.txt
+   ```
 
 ## Config
 - <b>analyzer</b>:
