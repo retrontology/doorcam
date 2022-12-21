@@ -16,7 +16,7 @@ import psutil
 from doorcapture import *
 
 def setup_logger(debug=False):
-    logger = getLogger('doorcam')
+    logger = getLogger()
     stream_formatter = Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
     journald_handler = journal.JournaldLogHandler()
     stream_handler = StreamHandler()
