@@ -4,7 +4,7 @@ from doorcam import *
 import time
 from logging import getLogger
 
-ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE + cv2.IMREAD_LOAD_GDAL
+ANALYZER_DECODE_FLAGS = cv2.IMREAD_GRAYSCALE
 
 class Analyzer():
 
