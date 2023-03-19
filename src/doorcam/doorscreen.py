@@ -5,7 +5,7 @@ from evdev import InputDevice
 from select import select
 from logging import getLogger
 
-SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4
+SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4 + cv2.IMREAD_LOAD_GDAL
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
