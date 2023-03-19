@@ -11,6 +11,7 @@ TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
 TRIM_DELAY = 86400
 TRIM_CHECK_INTERVAL = 300
+CAPTURE_DECODE_FLAGS = cv2.IMREAD_COLOR + cv2.IMREAD_LOAD_GDAL
 
 class Capture():
 
@@ -144,7 +145,7 @@ class Capture():
             for filename in images:
                 fullpath = os.path.join(imgpath, filename)
                 try:
-                    image = cv2.imread(fullpath, flags=cv2.IMREAD_COLOR)
+                    image = cv2.imread(fullpath, flags=CAPTURE_DECODE_FLAGS)
                     if self.rotation != None:
                         image = cv2.rotate(image, self.rotation)
                     if self.timestamp:
