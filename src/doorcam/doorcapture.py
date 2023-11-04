@@ -229,7 +229,8 @@ class Capture():
                 timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                 width, height = image.size
                 draw = ImageDraw.Draw(image)
-                font = ImageFont.truetype('arial.ttf', 36)
+                font = ImageFont.load_default()
+                font.size = 36
                 textwidth, textheight = draw.textsize(timestamp, font)
                 margin = 50
                 x = width - textwidth - margin
