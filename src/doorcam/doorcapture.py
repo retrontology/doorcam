@@ -208,7 +208,7 @@ class Capture():
 
         for filename in images:
 
-            full_filepath = os.path.join(post_path, filename)
+            full_filepath = os.path.join(path, filename)
             image = Image.open(full_filepath)
 
             if self.rotation:
