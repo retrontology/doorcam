@@ -228,7 +228,7 @@ class Capture():
             if self.timestamp:
                 timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                 draw = ImageDraw.Draw(image)
-                font = ImageFont.load_default()
+                font = ImageFont.truetype('DejaVuSansMono-Bold.ttf', 36)
                 font.size = 144
                 margin = 50
                 draw.text((margin, margin), timestamp.strftime(TIMESTAMP_FORMAT), font=font)
