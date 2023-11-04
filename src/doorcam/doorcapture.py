@@ -225,7 +225,7 @@ class Capture():
                     image = image.rotate(rotation, expand=1)
 
             if self.timestamp:
-                timestamp = datetime.datetime.strptime(image[:-4], TIME_FORMAT)
+                timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                 width, height = image.size
                 draw = ImageDraw.Draw(image)
                 font = ImageFont.truetype('arial.ttf', 36)
