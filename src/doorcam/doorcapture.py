@@ -231,7 +231,7 @@ class Capture():
                 font = ImageFont.load_default()
                 font.size = 36
                 margin = 50
-                draw.text((margin, margin), timestamp, font=font)
+                draw.text((margin, margin), timestamp.strftime(TIMESTAMP_FORMAT), font=font)
             
             outfile = os.path.join(post_path, os.path.basename(filename))
             image.save(outfile)
