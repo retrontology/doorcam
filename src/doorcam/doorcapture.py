@@ -227,15 +227,11 @@ class Capture():
 
             if self.timestamp:
                 timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
-                width, height = image.size
                 draw = ImageDraw.Draw(image)
                 font = ImageFont.load_default()
                 font.size = 36
-                textwidth, textheight = draw.textsize(timestamp, font)
                 margin = 50
-                x = width - textwidth - margin
-                y = height - textheight - margin
-                draw.text((x, y), timestamp, font=font)
+                draw.text((margin, margin), timestamp, font=font)
             
             outfile = os.path.join(post_path, os.path.basename(filename))
             image.save(outfile)
