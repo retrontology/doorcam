@@ -127,7 +127,6 @@ class Capture():
             self.logger.debug('Did not detect any valid event directories while trimming')
 
     def post_process(self, path):
-        path = os.path.abs(path)
         self.logger.debug(f'Post-processing images located at: {path}')
         imgpath = os.path.join(path, 'images')
         images = []
@@ -204,12 +203,13 @@ class Capture():
                 images.append(filename)
         images.sort()
 
-        path = os.path.join(path, 'post')
-        os.mkdir(path)
+        post_path = os.path.join(path, 'post')
+        os.mkdir(post_path)
 
         for filename in images:
 
-            image = Image.open(filename)
+            full_filepath = os.path.join(post_path, filename)
+            image = Image.open(full_filepath)
 
             if self.rotation:
                 match self.rotation:
@@ -235,7 +235,7 @@ class Capture():
                 y = height - textheight - margin
                 draw.text((x, y), timestamp, font=font)
             
-            outfile = os.path.join(path, os.path.basename(filename))
+            outfile = os.path.join(post_path, os.path.basename(filename))
             image.save(outfile)
         
         return path
