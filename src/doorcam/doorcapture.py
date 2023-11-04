@@ -127,6 +127,7 @@ class Capture():
             self.logger.debug('Did not detect any valid event directories while trimming')
 
     def post_process(self, path):
+        path = os.path.abs(path)
         self.logger.debug(f'Post-processing images located at: {path}')
         imgpath = os.path.join(path, 'images')
         images = []
