@@ -86,10 +86,11 @@ class Capture():
         while True:
             while len(self.post_process_queue) == 0:
                 time.sleep(1)
-            try:
-                self.post_process(self.post_process_queue.pop(0))
-            except Exception as e:
-                self.logger.error(e)
+            self.post_process(self.post_process_queue.pop(0))
+            #try:
+            #    self.post_process(self.post_process_queue.pop(0))
+            #except Exception as e:
+            #    self.logger.error(e)
     
     def trim_loop(self):
         timestamp = time.time()
