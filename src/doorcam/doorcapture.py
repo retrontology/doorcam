@@ -140,7 +140,7 @@ class Capture():
                 video_resolution = self.camera.resolution
                 if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
                     video_resolution = (video_resolution[1],video_resolution[0])
-                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'mp4v'), self.camera.max_fps, video_resolution)
+                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'avc1'), self.camera.max_fps, video_resolution)
                 video_writer.set(cv2.VIDEOWRITER_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
             for filename in images:
                 fullpath = os.path.join(imgpath, filename)
