@@ -215,11 +215,11 @@ class Capture():
             if self.rotation:
                 match self.rotation:
                     case cv2.ROTATE_90_CLOCKWISE:
-                        rotation = 90
+                        rotation = 270
                     case cv2.ROTATE_180:
                         rotation = 180
                     case cv2.ROTATE_90_COUNTERCLOCKWISE:
-                        rotation = 270
+                        rotation = 90
                     case _:
                         rotation = 0
                 if rotation:
@@ -229,7 +229,7 @@ class Capture():
                 timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
                 draw = ImageDraw.Draw(image)
                 font = ImageFont.load_default()
-                font.size = 36
+                font.size = 144
                 margin = 50
                 draw.text((margin, margin), timestamp.strftime(TIMESTAMP_FORMAT), font=font)
             
