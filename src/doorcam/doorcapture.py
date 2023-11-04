@@ -6,6 +6,7 @@ import os
 import shutil
 import cv2
 from logging import getLogger
+from PIL import Image, ImageDraw, ImageFont
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
@@ -181,7 +182,8 @@ class Capture():
             self.encode_video(video_file, p_img_path)
         if self.timestamp or self.rotation:
             try:
-                os.rmdir(p_img_path)
+                #os.rmdir(p_img_path)
+                pass
             except Exception as e:
                 self.logger.error(e)
         if not self.keep_images:
@@ -191,24 +193,51 @@ class Capture():
                 self.logger.error(e)
 
     def process_images(self, path):
+
         if not (self.timestamp or self.rotation):
             return path
-        path = os.path.join(path, 'post')
-        os.mkdir(path)
-        command = ""
+        
         images = []
         for filename in os.listdir(path):
             if filename[-4:].lower() == '.jpg':
                 images.append(filename)
         images.sort()
-        for image in images:
+
+        path = os.path.join(path, 'post')
+        os.mkdir(path)
+
+        for filename in images:
+
+            image = Image.open(filename)
+
+            if self.rotation:
+                match self.rotation:
+                    case cv2.ROTATE_90_CLOCKWISE:
+                        rotation = 90
+                    case cv2.ROTATE_180:
+                        rotation = 180
+                    case cv2.ROTATE_90_COUNTERCLOCKWISE:
+                        rotation = 270
+                    case _:
+                        rotation = 0
+                if rotation:
+                    image = image.rotate(rotation, expand=1)
+
             if self.timestamp:
                 timestamp = datetime.datetime.strptime(image[:-4], TIME_FORMAT)
-            if self.rotation:
-                pass
-
-    def timestamp_images(self, path):
-        pass
+                width, height = image.size
+                draw = ImageDraw.Draw(image)
+                font = ImageFont.truetype('arial.ttf', 36)
+                textwidth, textheight = draw.textsize(timestamp, font)
+                margin = 50
+                x = width - textwidth - margin
+                y = height - textheight - margin
+                draw.text((x, y), timestamp, font=font)
+            
+            outfile = os.path.join(path, os.path.basename(filename))
+            image.save(outfile)
+        
+        return path
 
     def encode_video(self, path, imgpath):
         #-c:v h264_v4l2m2m
