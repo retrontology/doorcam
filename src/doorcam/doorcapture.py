@@ -170,6 +170,50 @@ class Capture():
                     os.rmdir(imgpath)
                 except Exception as e:
                     self.logger.error(e)
+    
+    def post_process(self, path):
+        self.logger.debug(f'Post-processing images located at: {path}')
+        img_path = os.path.join(path, 'images')
+        p_img_path = self.process_images(img_path)
+        if self.video_encode:
+            video_file = os.path.basename(path) + '.mp4'
+            video_file = os.path.join(path, video_file)
+            self.encode_video(video_file, p_img_path)
+        if self.timestamp or self.rotation:
+            try:
+                os.rmdir(p_img_path)
+            except Exception as e:
+                self.logger.error(e)
+        if not self.keep_images:
+            try:
+                os.rmdir(img_path)
+            except Exception as e:
+                self.logger.error(e)
+
+    def process_images(self, path):
+        if not (self.timestamp or self.rotation):
+            return path
+        path = os.path.join(path, 'post')
+        os.mkdir(path)
+        command = ""
+        images = []
+        for filename in os.listdir(path):
+            if filename[-4:].lower() == '.jpg':
+                images.append(filename)
+        images.sort()
+        for image in images:
+            if self.timestamp:
+                timestamp = datetime.datetime.strptime(image[:-4], TIME_FORMAT)
+            if self.rotation:
+                pass
+
+    def timestamp_images(self, path):
+        pass
+
+    def encode_video(self, path, imgpath):
+        #-c:v h264_v4l2m2m
+        #-pattern_type glob -i '*.jpg'
+        pass
 
     def trigger_capture(self):
         self.activate = True
