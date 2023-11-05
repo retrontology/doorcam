@@ -7,6 +7,7 @@ import shutil
 import cv2
 from logging import getLogger
 from PIL import Image, ImageDraw, ImageFont
+import subprocess
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
@@ -86,11 +87,10 @@ class Capture():
         while True:
             while len(self.post_process_queue) == 0:
                 time.sleep(1)
-            self.post_process(self.post_process_queue.pop(0))
-            #try:
-            #    self.post_process(self.post_process_queue.pop(0))
-            #except Exception as e:
-            #    self.logger.error(e)
+            try:
+                self.post_process(self.post_process_queue.pop(0))
+            except Exception as e:
+                self.logger.error(e)
     
     def trim_loop(self):
         timestamp = time.time()
@@ -183,8 +183,7 @@ class Capture():
             self.encode_video(video_file, p_img_path)
         if self.timestamp or self.rotation:
             try:
-                #os.rmdir(p_img_path)
-                pass
+                os.rmdir(p_img_path)
             except Exception as e:
                 self.logger.error(e)
         if not self.keep_images:
@@ -238,9 +237,17 @@ class Capture():
         return path
 
     def encode_video(self, path, imgpath):
-        #-c:v h264_v4l2m2m
-        #-pattern_type glob -i '*.jpg'
-        pass
+        command = [
+            'ffmpeg',
+            '-pattern_type', 'glob',
+            '-i', os.path.join(imgpath, '*.jpg'),
+            '-r', self.camera.max_fps,
+            '-c:v', 'h264_v4l2m2m',
+            '-pix_fmt', 'yuv420p',
+            '-b:v', '4M',
+            path
+        ]
+        subprocess.run(command)
 
     def trigger_capture(self):
         self.activate = True
