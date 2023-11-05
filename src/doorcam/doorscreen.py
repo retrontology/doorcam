@@ -145,27 +145,6 @@ class Screen():
         image = cv2.cvtColor(image, self.color_conv)
         return image
 
-    def process_image(self, src):
-
-        image = Image.open(BytesIO(src), formats=('jpeg',))
-
-        if self.rotation:
-            match self.rotation:
-                case cv2.ROTATE_90_CLOCKWISE:
-                    rotation = 270
-                case cv2.ROTATE_180:
-                    rotation = 180
-                case cv2.ROTATE_90_COUNTERCLOCKWISE:
-                    rotation = 90
-                case _:
-                    rotation = 0
-            if rotation:
-                image = image.rotate(rotation, expand=1)
-        image = image.resize(self.resolution)
-        image = image.convert("P", palette=Image.ADAPTIVE, colors=8)
-
-        return image
-
         
     def turn_off(self):
         self.fb_blank()
