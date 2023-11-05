@@ -8,6 +8,7 @@ import cv2
 from logging import getLogger
 from PIL import Image, ImageDraw, ImageFont
 import subprocess
+import shutil
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
@@ -127,52 +128,6 @@ class Capture():
                         self.logger.error(e)
         else:
             self.logger.debug('Did not detect any valid event directories while trimming')
-
-    def post_process(self, path):
-        self.logger.debug(f'Post-processing images located at: {path}')
-        imgpath = os.path.join(path, 'images')
-        images = []
-        for filename in os.listdir(imgpath):
-            if filename[-4:].lower() == '.jpg':
-                images.append(filename)
-        if len(images) > 0 and (self.timestamp or self.video_encode):
-            images.sort()
-            if self.video_encode:
-                video_file = os.path.basename(path) + '.mp4'
-                video_file = os.path.join(path, video_file)
-                video_resolution = self.camera.resolution
-                if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
-                    video_resolution = (video_resolution[1],video_resolution[0])
-                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'avc1'), self.camera.max_fps, video_resolution)
-                video_writer.set(cv2.VIDEOWRITER_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
-            for filename in images:
-                fullpath = os.path.join(imgpath, filename)
-                try:
-                    image = cv2.imread(fullpath, flags=CAPTURE_DECODE_FLAGS)
-                    if self.rotation != None:
-                        image = cv2.rotate(image, self.rotation)
-                    if self.timestamp:
-                        timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
-                        image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))
-                        if self.keep_images:
-                            cv2.imwrite(fullpath, image)
-                    if self.video_encode:
-                        video_writer.write(image)
-                    if not self.keep_images:
-                        try:
-                            os.remove(fullpath)
-                        except Exception as e:
-                            self.logger.error(e)
-                except Exception as e:
-                    self.logger.error(e)
-            if self.video_encode:
-                video_writer.release()
-                self.logger.info(f'Video of {path} encoded and saved to {video_file}')
-            if not self.keep_images:
-                try:
-                    os.rmdir(imgpath)
-                except Exception as e:
-                    self.logger.error(e)
     
     def post_process(self, path):
         self.logger.debug(f'Post-processing images located at: {path}')
@@ -184,12 +139,12 @@ class Capture():
             self.encode_video(video_file, p_img_path)
         if self.timestamp or self.rotation:
             try:
-                os.remove(p_img_path)
+                shutil.rmtree(p_img_path)
             except Exception as e:
                 self.logger.error(e)
         if not self.keep_images:
             try:
-                os.remove(img_path)
+                shutil.rmtree(img_path)
             except Exception as e:
                 self.logger.error(e)
 
