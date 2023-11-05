@@ -147,7 +147,7 @@ class Screen():
 
     def process_image(self, src):
 
-        image = Image.open(BytesIO(src), formats=('image/jpeg',))
+        image = Image.open(BytesIO(src), formats=('jpeg',))
 
         if self.rotation:
             match self.rotation:
