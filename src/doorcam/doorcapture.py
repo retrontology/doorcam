@@ -6,6 +6,9 @@ import os
 import shutil
 import cv2
 from logging import getLogger
+from PIL import Image, ImageDraw, ImageFont
+import subprocess
+import shutil
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S-%f"
 TIMESTAMP_FORMAT = "%H:%M:%S %m/%d/%Y"
@@ -124,52 +127,87 @@ class Capture():
                         self.logger.error(e)
         else:
             self.logger.debug('Did not detect any valid event directories while trimming')
-
+    
     def post_process(self, path):
         self.logger.debug(f'Post-processing images located at: {path}')
-        imgpath = os.path.join(path, 'images')
+        img_path = os.path.join(path, 'images')
+        p_img_path = self.process_images(img_path)
+        if self.video_encode:
+            video_file = os.path.basename(path) + '.mp4'
+            video_file = os.path.join(path, video_file)
+            self.encode_video(video_file, p_img_path)
+        if self.timestamp or self.rotation:
+            try:
+                shutil.rmtree(p_img_path)
+            except Exception as e:
+                self.logger.error(e)
+        if not self.keep_images:
+            try:
+                shutil.rmtree(img_path)
+            except Exception as e:
+                self.logger.error(e)
+
+    def process_images(self, path):
+
+        if not (self.timestamp or self.rotation):
+            return path
+        
         images = []
-        for filename in os.listdir(imgpath):
+        for filename in os.listdir(path):
             if filename[-4:].lower() == '.jpg':
                 images.append(filename)
-        if len(images) > 0 and (self.timestamp or self.video_encode):
-            images.sort()
-            if self.video_encode:
-                video_file = os.path.basename(path) + '.mp4'
-                video_file = os.path.join(path, video_file)
-                video_resolution = self.camera.resolution
-                if self.rotation == cv2.ROTATE_90_CLOCKWISE or self.rotation == cv2.ROTATE_90_COUNTERCLOCKWISE:
-                    video_resolution = (video_resolution[1],video_resolution[0])
-                video_writer = cv2.VideoWriter(video_file, cv2.VideoWriter_fourcc(*'mp4v'), self.camera.max_fps, video_resolution)
-                video_writer.set(cv2.VIDEOWRITER_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
-            for filename in images:
-                fullpath = os.path.join(imgpath, filename)
-                try:
-                    image = cv2.imread(fullpath, flags=CAPTURE_DECODE_FLAGS)
-                    if self.rotation != None:
-                        image = cv2.rotate(image, self.rotation)
-                    if self.timestamp:
-                        timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
-                        image = cv2.putText(image, timestamp.strftime(TIMESTAMP_FORMAT), (50,50), cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255))
-                        if self.keep_images:
-                            cv2.imwrite(fullpath, image)
-                    if self.video_encode:
-                        video_writer.write(image)
-                    if not self.keep_images:
-                        try:
-                            os.remove(fullpath)
-                        except Exception as e:
-                            self.logger.error(e)
-                except Exception as e:
-                    self.logger.error(e)
-            if self.video_encode:
-                video_writer.release()
-                self.logger.info(f'Video of {path} encoded and saved to {video_file}')
-            if not self.keep_images:
-                try:
-                    os.rmdir(imgpath)
-                except Exception as e:
-                    self.logger.error(e)
+        images.sort()
+
+        post_path = os.path.join(path, 'post')
+        os.mkdir(post_path)
+
+        for filename in images:
+
+            full_filepath = os.path.join(path, filename)
+            image = Image.open(full_filepath)
+
+            if self.rotation:
+                match self.rotation:
+                    case cv2.ROTATE_90_CLOCKWISE:
+                        rotation = 270
+                    case cv2.ROTATE_180:
+                        rotation = 180
+                    case cv2.ROTATE_90_COUNTERCLOCKWISE:
+                        rotation = 90
+                    case _:
+                        rotation = 0
+                if rotation:
+                    image = image.rotate(rotation, expand=1)
+
+            if self.timestamp:
+                timestamp = datetime.datetime.strptime(filename[:-4], TIME_FORMAT)
+                draw = ImageDraw.Draw(image)
+                font = ImageFont.truetype('DejaVuSansMono-Bold.ttf', 36)
+                margin = 50
+                draw.text((margin, margin), timestamp.strftime(TIMESTAMP_FORMAT), font=font)
+            
+            outfile = os.path.join(post_path, os.path.basename(filename))
+            image.save(outfile)
+        
+        return post_path
+
+    def encode_video(self, path, imgpath):
+        command = [
+            'ffmpeg',
+            '-pattern_type', 'glob',
+            '-i', os.path.join(imgpath, '*.jpg'),
+            '-r', str(self.camera.max_fps),
+            '-c:v', 'h264_v4l2m2m',
+            '-pix_fmt', 'yuv420p',
+            '-b:v', '4M',
+            path
+        ]
+        result = subprocess.run(command, capture_output=True)
+        event = os.path.basename(os.path.dirname(path))
+        if result.returncode != 0:
+            self.logger.error(f'Could not encode {event}!: {result.stderr}')
+        else:
+            self.logger.info(f'Video of {event} encoded and saved to {path}')
 
     def trigger_capture(self):
         self.activate = True
