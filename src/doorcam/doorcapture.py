@@ -189,7 +189,7 @@ class Capture():
             outfile = os.path.join(post_path, os.path.basename(filename))
             image.save(outfile)
         
-        return path
+        return post_path
 
     def encode_video(self, path, imgpath):
         command = [
