@@ -88,7 +88,6 @@ class Capture():
         while True:
             while len(self.post_process_queue) == 0:
                 time.sleep(1)
-            self.post_process(self.post_process_queue.pop(0))
             try:
                 self.post_process(self.post_process_queue.pop(0))
             except Exception as e:
