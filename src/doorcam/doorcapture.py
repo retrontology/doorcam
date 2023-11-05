@@ -242,7 +242,7 @@ class Capture():
             'ffmpeg',
             '-pattern_type', 'glob',
             '-i', os.path.join(imgpath, '*.jpg'),
-            '-r', self.camera.max_fps,
+            '-r', str(self.camera.max_fps),
             '-c:v', 'h264_v4l2m2m',
             '-pix_fmt', 'yuv420p',
             '-b:v', '4M',
