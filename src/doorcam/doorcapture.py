@@ -88,10 +88,10 @@ class Capture():
             while len(self.post_process_queue) == 0:
                 time.sleep(1)
             self.post_process(self.post_process_queue.pop(0))
-            #try:
-            #    self.post_process(self.post_process_queue.pop(0))
-            #except Exception as e:
-            #    self.logger.error(e)
+            try:
+                self.post_process(self.post_process_queue.pop(0))
+            except Exception as e:
+                self.logger.error(e)
     
     def trim_loop(self):
         timestamp = time.time()
@@ -184,12 +184,12 @@ class Capture():
             self.encode_video(video_file, p_img_path)
         if self.timestamp or self.rotation:
             try:
-                os.rmdir(p_img_path)
+                os.remove(p_img_path)
             except Exception as e:
                 self.logger.error(e)
         if not self.keep_images:
             try:
-                os.rmdir(img_path)
+                os.remove(img_path)
             except Exception as e:
                 self.logger.error(e)
 
