@@ -248,7 +248,7 @@ class Capture():
             '-b:v', '4M',
             path
         ]
-        result = subprocess.run(command, stdout=subprocess.DEVNULL, capture_output=True)
+        result = subprocess.run(command, capture_output=True)
         event = os.path.basename(os.path.dirname(path))
         if result.returncode != 0:
             self.logger.error(f'Could not encode {event}!: {result.stderr}')
