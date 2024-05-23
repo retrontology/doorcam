@@ -14,6 +14,11 @@ from logging import getLogger, StreamHandler, Formatter, DEBUG, INFO
 from cysystemd import journal
 import psutil
 from doorcapture import *
+import gi
+
+gi.require_version('Gst', '1.0')
+gi.require_version('GstRtspServer', '1.0')
+from gi.repository import Gst, GObject
 
 def setup_logger(debug=False):
     logger = getLogger()
@@ -97,16 +102,22 @@ def main():
         config['analyzer']['undistort_balance'],
         analyzer_callbacks
     )
-    stream_handler = partial(MJPGHandler, cam)
-    server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
-    if args.fps:
-        http_thread = Thread(target=server.serve_forever, daemon=True)
-        http_thread.start()
-        while True:
-            logger.info(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
-            time.sleep(1)
-    else:
-        server.serve_forever()
+    # Old MJPEG Server Code
+    #stream_handler = partial(MJPGHandler, cam)
+    #server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
+    #if args.fps:
+    #    http_thread = Thread(target=server.serve_forever, daemon=True)
+    #    http_thread.start()
+    #    while True:
+    #        logger.info(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
+    #        time.sleep(1)
+    #else:
+    #    server.serve_forever()
+    GObject.threads_init()
+    Gst.init(None)
+    server = GstServer()
+    loop = GObject.MainLoop()
+    loop.run()
     
 
 if __name__ == '__main__':
