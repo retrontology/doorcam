@@ -115,7 +115,7 @@ def main():
     #    server.serve_forever()
     GObject.threads_init()
     Gst.init(None)
-    server = GstServer()
+    server = GstServer(cam)
     loop = GObject.MainLoop()
     loop.run()
     

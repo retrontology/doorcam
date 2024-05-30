@@ -6,6 +6,7 @@ from .doorcam import Camera
 from logging import getLogger
 import time
 import gi
+gi.require_version('GstRtspServer', '1.0')
 from gi.repository import Gst, GstRtspServer
 
 GST_DECODE_FLAGS = cv2.IMREAD_COLOR + cv2.IMREAD_LOAD_GDAL
