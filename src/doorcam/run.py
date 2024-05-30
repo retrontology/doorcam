@@ -18,7 +18,7 @@ import gi
 
 gi.require_version('Gst', '1.0')
 gi.require_version('GstRtspServer', '1.0')
-from gi.repository import Gst, GObject
+from gi.repository import Gst, GObject, GLib
 
 def setup_logger(debug=False):
     logger = getLogger()
@@ -116,7 +116,7 @@ def main():
     GObject.threads_init()
     Gst.init(None)
     server = GstServer(cam)
-    loop = GObject.MainLoop()
+    loop = GLib.MainLoop()
     loop.run()
     
 
