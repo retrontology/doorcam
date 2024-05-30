@@ -1,6 +1,6 @@
 from threading import Thread
-from doorcam.doorscreen import *
-from doorcam.doorcam import *
+from .doorscreen import *
+from .doorcam import *
 import time
 from logging import getLogger
 
