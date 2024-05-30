@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from .doorcam import Camera
+from doorcam.doorcam import Camera
 from logging import getLogger
 import time
 from gi.repository import Gst, GstRtspServer

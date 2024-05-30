@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from .doorcam import *
+from doorcam.doorcam import *
 from evdev import InputDevice
 from select import select
 from logging import getLogger

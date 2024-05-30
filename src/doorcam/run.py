@@ -2,18 +2,18 @@ from ast import parse
 import cv2
 import numpy as np
 from threading import Thread
-from .doorscreen import *
-from .doorcam import *
-from .doorstream import *
-from .dooranalyzer import *
-from .doorconfig import *
+from doorcam.doorscreen import *
+from doorcam.doorcam import *
+from doorcam.doorstream import *
+from doorcam.dooranalyzer import *
+from doorcam.doorconfig import *
 import time
 from functools import partial
 import argparse
 from logging import getLogger, StreamHandler, Formatter, DEBUG, INFO
 from cysystemd import journal
 import psutil
-from .doorcapture import *
+from doorcam.doorcapture import *
 import gi
 
 gi.require_version('Gst', '1.0')
