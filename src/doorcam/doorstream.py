@@ -63,6 +63,7 @@ class DoorFactory(GstRtspServer.RTSPMediaFactory):
     def __init__(self, camera:Camera, **properties):
         super(DoorFactory, self).__init__(**properties)
         self.camera = camera
+        self.duration = 1 / self.camera.fps * Gst.SECOND
         self.launch_string = 'appsrc name=source block=true format=GST_FORMAT_TIME ' \
                              f'caps=video/x-raw,format=BGR,width={self.camera.resolution[0]},height={self.camera.resolution[1]},framerate={self.camera.fps}/1 ' \
                              '! videoconvert ! video/x-raw,format=I420 ' \
