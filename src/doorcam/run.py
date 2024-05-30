@@ -103,20 +103,20 @@ def main():
         analyzer_callbacks
     )
     # Old MJPEG Server Code
-    #stream_handler = partial(MJPGHandler, cam)
-    #server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
-    #if args.fps:
-    #    http_thread = Thread(target=server.serve_forever, daemon=True)
-    #    http_thread.start()
-    #    while True:
-    #        logger.info(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
-    #        time.sleep(1)
-    #else:
-    #    server.serve_forever()
-    Gst.init(None)
-    server = GstServer(cam)
-    loop = GLib.MainLoop()
-    loop.run()
+    stream_handler = partial(MJPGHandler, cam)
+    server = MJPGServer((config['stream']['ip'], config['stream']['port']), stream_handler)
+    if args.fps:
+        http_thread = Thread(target=server.serve_forever, daemon=True)
+        http_thread.start()
+        while True:
+            logger.info(f'Cam: {cam.fps} | Screen: {screen.fps} | Analyzer: {analyzer.fps}')
+            time.sleep(1)
+    else:
+        server.serve_forever()
+    #Gst.init(None)
+    #server = GstServer(cam)
+    #loop = GLib.MainLoop()
+    #loop.run()
     
 
 if __name__ == '__main__':
