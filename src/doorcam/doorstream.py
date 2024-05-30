@@ -5,6 +5,7 @@ from socketserver import ThreadingMixIn
 from .doorcam import Camera
 from logging import getLogger
 import time
+import gi
 from gi.repository import Gst, GstRtspServer
 
 GST_DECODE_FLAGS = cv2.IMREAD_COLOR + cv2.IMREAD_LOAD_GDAL
