@@ -71,7 +71,7 @@ class DoorFactory(GstRtspServer.RTSPMediaFactory):
                              '! rtph264pay config-interval=1 name=pay0 pt=96 '
 
     def on_need_data(self, src, length):
-        if self.camera.current_jpg:
+        if self.camera.current_jpg != None:
             image = cv2.imdecode(self.camera.current_jpg, GST_DECODE_FLAGS)
             data = image.tostring()
             buf = Gst.Buffer.new_allocate(None, len(data), None)
