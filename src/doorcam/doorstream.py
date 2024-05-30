@@ -71,19 +71,18 @@ class DoorFactory(GstRtspServer.RTSPMediaFactory):
                              '! rtph264pay config-interval=1 name=pay0 pt=96 '
 
     def on_need_data(self, src, length):
-        if self.camera.current_jpg != None:
-            image = cv2.imdecode(self.camera.current_jpg, GST_DECODE_FLAGS)
-            data = image.tostring()
-            buf = Gst.Buffer.new_allocate(None, len(data), None)
-            buf.fill(0, data)
-            buf.duration = self.duration
-            timestamp = self.number_frames * self.duration
-            buf.pts = buf.dts = int(timestamp)
-            buf.offset = timestamp
-            self.number_frames += 1
-            retval = src.emit('push-buffer', buf)
-            if retval != Gst.FlowReturn.OK:
-                print(retval)
+        image = cv2.imdecode(self.camera.current_jpg, GST_DECODE_FLAGS)
+        data = image.tostring()
+        buf = Gst.Buffer.new_allocate(None, len(data), None)
+        buf.fill(0, data)
+        buf.duration = self.duration
+        timestamp = self.number_frames * self.duration
+        buf.pts = buf.dts = int(timestamp)
+        buf.offset = timestamp
+        self.number_frames += 1
+        retval = src.emit('push-buffer', buf)
+        if retval != Gst.FlowReturn.OK:
+            print(retval)
 
     def do_create_element(self, url):
         return Gst.parse_launch(self.launch_string)
