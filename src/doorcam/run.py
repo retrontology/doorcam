@@ -18,7 +18,7 @@ import gi
 
 gi.require_version('Gst', '1.0')
 gi.require_version('GstRtspServer', '1.0')
-from gi.repository import Gst, GObject, GLib
+from gi.repository import Gst, GLib
 
 def setup_logger(debug=False):
     logger = getLogger()
