@@ -1,11 +1,13 @@
 import cv2
 import numpy as np
-from doorcam import *
+from .doorcam import *
 from evdev import InputDevice
 from select import select
 from logging import getLogger
+import time
+from threading import Thread
 
-SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4 + cv2.IMREAD_LOAD_GDAL
+SCREEN_DECODE_FLAGS = cv2.IMREAD_ANYCOLOR
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():

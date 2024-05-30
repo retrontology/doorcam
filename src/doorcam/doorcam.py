@@ -36,7 +36,7 @@ class Camera():
     
     def remove_callback(self, callback):
         if self.update_callbacks != None and callback in self.update_callbacks:
-            if len(self.update_callbacks == 1):
+            if len(self.update_callbacks) == 1:
                 self.update_callbacks = None
             else:
                 self.update_callbacks.remove(callback)

@@ -2,11 +2,12 @@ import cv2
 import numpy as np
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from doorcam import Camera
+from .doorcam import Camera
 from logging import getLogger
 import time
-import gi
 from gi.repository import Gst, GstRtspServer
+
+GST_DECODE_FLAGS = cv2.IMREAD_COLOR + cv2.IMREAD_LOAD_GDAL
 
 class MJPGServer(ThreadingMixIn, HTTPServer):
     pass
@@ -61,31 +62,25 @@ class DoorFactory(GstRtspServer.RTSPMediaFactory):
         super(DoorFactory, self).__init__(**properties)
         self.camera = camera
         self.launch_string = 'appsrc name=source block=true format=GST_FORMAT_TIME ' \
-                             'caps=video/x-raw,format=BGR,width=1280,height=720,framerate={}/1 ' \
+                             f'caps=video/x-raw,format=BGR,width={self.camera.resolution[0]},height={self.camera.resolution[1]},framerate={self.camera.fps}/1 ' \
                              '! videoconvert ! video/x-raw,format=I420 ' \
-                             '! x264enc speed-preset=ultrafast tune=zerolatency ! queue ' \
-                             '! rtph264pay config-interval=1 name=pay0 pt=96 '.format(self.fps)
-        # streams to gst-launch-1.0 rtspsrc location=rtsp://localhost:8554/test latency=50 ! decodebin ! autovideosink
+                             '! v4l2h264enc speed-preset=ultrafast tune=zerolatency ! queue ' \
+                             '! rtph264pay config-interval=1 name=pay0 pt=96 '
 
-    def on_need_data(self, src, lenght):
-        if self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret:
-                data = frame.tostring()
-                #print(data)
-                buf = Gst.Buffer.new_allocate(None, len(data), None)
-                buf.fill(0, data)
-                buf.duration = self.duration
-                timestamp = self.number_frames * self.duration
-                buf.pts = buf.dts = int(timestamp)
-                buf.offset = timestamp
-                self.number_frames += 1
-                retval = src.emit('push-buffer', buf)
-                #print('pushed buffer, frame {}, duration {} ns, durations {} s'.format(self.number_frames,
-                #                                                                       self.duration,
-                #                                                                       self.duration / Gst.SECOND))
-                if retval != Gst.FlowReturn.OK:
-                    print(retval)
+    def on_need_data(self, src, length):
+        if self.camera.cap.isOpened():
+            image = cv2.imdecode(self.camera.current_jpg, GST_DECODE_FLAGS)
+            data = image.tostring()
+            buf = Gst.Buffer.new_allocate(None, len(data), None)
+            buf.fill(0, data)
+            buf.duration = self.duration
+            timestamp = self.number_frames * self.duration
+            buf.pts = buf.dts = int(timestamp)
+            buf.offset = timestamp
+            self.number_frames += 1
+            retval = src.emit('push-buffer', buf)
+            if retval != Gst.FlowReturn.OK:
+                print(retval)
 
     def do_create_element(self, url):
         return Gst.parse_launch(self.launch_string)
