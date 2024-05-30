@@ -113,7 +113,6 @@ def main():
     #        time.sleep(1)
     #else:
     #    server.serve_forever()
-    GObject.threads_init()
     Gst.init(None)
     server = GstServer(cam)
     loop = GLib.MainLoop()
