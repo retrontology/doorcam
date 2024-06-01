@@ -7,7 +7,7 @@ from logging import getLogger
 import time
 from threading import Thread
 
-SCREEN_DECODE_FLAGS = cv2.IMREAD_ANYCOLOR
+SCREEN_DECODE_FLAGS = cv2.IMREAD_REDUCED_COLOR_4 + cv2.IMREAD_LOAD_GDAL
 #DECODE_FLAGS = cv2.IMREAD_COLOR
 
 class Screen():
