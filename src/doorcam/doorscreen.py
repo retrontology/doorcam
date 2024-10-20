@@ -72,6 +72,7 @@ class Screen():
         try:
             self.frame = self.process_image(image)
             self.fb_write(self.frame.tobytes())
+            self.last_timestamp = time.time()
         except Exception as e:
             self.logger.error(e)
 
@@ -119,7 +120,7 @@ class Screen():
             while now - start < self.activation_period:
                 self.fb_write_image(self.camera.current_jpg)
                 self.frame_count += 1
-                time.sleep(1/self.camera.max_fps)
+                time.sleep((self.last_timestamp + self.camera.interval) - time.time())
                 now = time.time()
                 if self.activate:
                     self.activate = False

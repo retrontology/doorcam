@@ -16,6 +16,7 @@ class Camera():
         self.fourcc = fourcc
         self.frame_count = 0
         self.max_fps = max_fps
+        self.interval = 1/self.max_fps
         self.fps = 0
         self.undistort_K = undistort_K
         self.undistort_D = undistort_D
