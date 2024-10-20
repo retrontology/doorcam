@@ -32,6 +32,8 @@ class Screen():
         self.frame = None
         self.frame_count = 0
         self.activate = True
+        self.frame_update = False
+        self.camera.add_callback(self.trigger_frame_update)
         self.setup_undistort(undistort, undistort_balance)
         self.turn_off()
         self.fps_thread = Thread(target=self.fps_loop)
@@ -56,6 +58,9 @@ class Screen():
         undistort_NK = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(undistort_K, undistort_D, undistort_DIM, np.eye(3), balance=undistort_balance)
         self.undistort_map1, self.undistort_map2 = cv2.fisheye.initUndistortRectifyMap(undistort_K, undistort_D, np.eye(3), undistort_NK, undistort_DIM, cv2.CV_16SC2)
         self.logger.debug(f'Distortion maps calculated!')
+
+    def trigger_frame_update(self, image):
+        self.frame_update = True
 
     def fb_blank(self, data = 0):
         blank = np.array([[data]], dtype=self.dtype)
@@ -119,7 +124,9 @@ class Screen():
             while now - start < self.activation_period:
                 self.fb_write_image(self.camera.current_jpg)
                 self.frame_count += 1
-                time.sleep(1/self.camera.max_fps)
+                while not self.frame_update:
+                    time.sleep(0.01)
+                self.frame_update = False
                 now = time.time()
                 if self.activate:
                     self.activate = False
