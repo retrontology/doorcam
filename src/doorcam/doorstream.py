@@ -21,7 +21,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
 
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera
-        self.last_timestamp = None
+        self.last_timestamp = time.time()
         super().__init__(*args, **kwargs)
 
     def do_GET(self):

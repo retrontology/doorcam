@@ -34,6 +34,7 @@ class Screen():
         self.activate = True
         self.setup_undistort(undistort, undistort_balance)
         self.turn_off()
+        self.last_timestamp = time.time()
         self.fps_thread = Thread(target=self.fps_loop)
         self.fps_thread.start()
         self.play_thread = Thread(target=self.play_loop)
