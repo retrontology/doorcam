@@ -121,7 +121,9 @@ class Screen():
             while now - start < self.activation_period:
                 self.fb_write_image(self.camera.current_jpg)
                 self.frame_count += 1
-                time.sleep((self.last_timestamp + self.camera.interval) - time.time())
+                delay = (self.last_timestamp + self.camera.interval) - time.time()
+                if delay > 0:
+                    time.sleep(delay)
                 now = time.time()
                 if self.activate:
                     self.activate = False

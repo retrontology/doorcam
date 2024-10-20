@@ -49,7 +49,9 @@ class MJPGHandler(BaseHTTPRequestHandler):
                     self.logger.error(e)
                     self.logger.info(f'Stopping MJPG stream to {self.client_address}')
                     break
-                time.sleep((self.last_timestamp + self.camera.interval) - time.time())
+                delay = (self.last_timestamp + self.camera.interval) - time.time()
+                if delay > 0:
+                    time.sleep(delay)
         else:
             self.send_error(404)
             self.end_headers()
