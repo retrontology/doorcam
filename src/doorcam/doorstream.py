@@ -21,7 +21,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
 
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera
-        #self.interval = 1/self.camera.max_fps
+        self.interval = 1/self.camera.max_fps
         self.last_timestamp = None
         super().__init__(*args, **kwargs)
 
@@ -50,7 +50,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
                     self.logger.error(e)
                     self.logger.info(f'Stopping MJPG stream to {self.client_address}')
                     break
-                time.sleep(time.time() - self.last_timestamp)
+                time.sleep((self.last_timestamp + self.interval) - time.time())
         else:
             self.send_error(404)
             self.end_headers()
