@@ -22,11 +22,7 @@ class MJPGHandler(BaseHTTPRequestHandler):
     def __init__(self, camera: Camera, *args, **kwargs):
         self.camera = camera
         self.frame_update = False
-        self.camera.add_callback(self.trigger_frame_update)
         super().__init__(*args, **kwargs)
-
-    def trigger_frame_update(self, image):
-        self.frame_update = True
 
     def do_GET(self):
         
@@ -51,10 +47,9 @@ class MJPGHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self.logger.error(e)
                     self.logger.info(f'Stopping MJPG stream to {self.client_address}')
-                    self.camera.remove_callback(self.trigger_frame_update)
                     break
-                while not self.frame_update:
-                    time.sleep(0.01)
+                while True:
+                    time.sleep(1/self.camera.max_fps)
                 self.frame_update = False
         else:
             self.send_error(404)
