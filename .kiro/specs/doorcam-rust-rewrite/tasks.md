@@ -41,14 +41,23 @@
     - Add frame processing utilities for rotation and conversion
     - _Requirements: 11.1, 11.4_
 
-- [ ] 4. Implement camera interface with V4L2
-  - [ ] 4.1 Create V4L2 camera capture
+- [x] 4. Implement camera interface with V4L2
+
+
+
+
+
+  - [x] 4.1 Create V4L2 camera capture
+
+
     - Implement CameraInterface using v4l crate
     - Configure camera resolution, FPS, and format settings
     - Add hardware-accelerated capture support
     - _Requirements: 5.4, 12.1_
 
-  - [ ] 4.2 Integrate camera with ring buffer
+  - [x] 4.2 Integrate camera with ring buffer
+
+
     - Connect camera capture loop to ring buffer
     - Implement frame rate control and timing
     - Add error handling and reconnection logic

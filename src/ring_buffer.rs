@@ -388,6 +388,7 @@ impl Default for RingBufferBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::sleep;
     
