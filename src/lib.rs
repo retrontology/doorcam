@@ -8,6 +8,12 @@ pub mod integration;
 pub mod analyzer;
 pub mod analyzer_integration;
 
+#[cfg(feature = "streaming")]
+pub mod streaming;
+
+#[cfg(feature = "streaming")]
+pub mod streaming_integration;
+
 pub use config::DoorcamConfig;
 pub use error::{DoorcamError, Result};
 pub use events::{
@@ -21,3 +27,9 @@ pub use camera::{CameraInterface, CameraInterfaceBuilder, CameraError};
 pub use integration::{CameraRingBufferIntegration, CameraRingBufferIntegrationBuilder, IntegrationStatus, HealthCheckResult, HealthStatus};
 pub use analyzer::MotionAnalyzer;
 pub use analyzer_integration::{MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder, MotionAnalysisMetrics};
+
+#[cfg(feature = "streaming")]
+pub use streaming::{StreamServer, StreamServerBuilder, StreamStats};
+
+#[cfg(feature = "streaming")]
+pub use streaming_integration::{StreamingIntegration, StreamingStats, FrameRateAdapter, QualityAdapter};

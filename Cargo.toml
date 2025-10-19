@@ -39,18 +39,30 @@ chrono = { version = "0.4", features = ["serde"] }
 # Video and image processing (Linux only)
 v4l = { version = "0.14", optional = true }
 opencv = { version = "0.92", optional = true }
+serde_json = "1.0.145"
+axum = "0.7"
+tower = "0.4"
+tower-http = "0.5"
+async-stream = "0.3"
+futures = "0.3"
+bytes = "1.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 v4l = { version = "0.14", optional = true }
 opencv = { version = "0.92", optional = true }
 
-# HTTP server (will be used in later tasks)
-# axum = { version = "0.7", optional = true }
-# tower = { version = "0.4", optional = true }
+# HTTP server
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", optional = true }
 
 # Async streams
-# async-stream = { version = "0.3", optional = true }
-# futures = { version = "0.3", optional = true }
+async-stream = { version = "0.3", optional = true }
+futures = { version = "0.3", optional = true }
+bytes = { version = "1.0", optional = true }
+
+# JSON serialization
+serde_json = "1.0"
 
 # Input device handling (will be used in later tasks)
 # evdev = { version = "0.12", optional = true }
@@ -59,7 +71,7 @@ opencv = { version = "0.92", optional = true }
 default = []
 camera = ["dep:v4l"]
 motion_analysis = ["dep:opencv"]
-# streaming = ["axum", "tower", "async-stream", "futures"]
+streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
 # display = ["evdev"]
 
 [[bin]]
