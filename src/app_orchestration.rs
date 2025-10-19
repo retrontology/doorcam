@@ -131,7 +131,7 @@ impl DoorcamOrchestrator {
         {
             let shutdown_sender_sigterm = Arc::clone(&shutdown_sender);
             tokio::spawn(async move {
-                if let Ok(()) = signal::unix::signal(signal::unix::SignalKind::terminate())
+                if let Some(()) = signal::unix::signal(signal::unix::SignalKind::terminate())
                     .expect("Failed to register SIGTERM handler")
                     .recv()
                     .await
