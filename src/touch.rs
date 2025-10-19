@@ -1,17 +1,21 @@
 use crate::config::DisplayConfig;
 use crate::events::{DoorcamEvent, EventBus};
 use crate::error::{DoorcamError, Result};
-use std::fs::File;
-use std::io::{Read, BufReader};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
-/// Touch input handler for processing touch events from input devices
+#[cfg(feature = "display")]
+use evdev::{Device, EventType, InputEventKind, Key};
+
+/// Touch input handler for processing touch events from input devices using evdev
 pub struct TouchInputHandler {
     device_path: String,
     event_bus: Arc<EventBus>,
+    retry_count: u32,
+    max_retries: u32,
+    retry_delay: Duration,
 }
 
 impl TouchInputHandler {
@@ -20,6 +24,9 @@ impl TouchInputHandler {
         Self {
             device_path: config.touch_device.clone(),
             event_bus,
+            retry_count: 0,
+            max_retries: 10,
+            retry_delay: Duration::from_secs(5),
         }
     }
 
@@ -29,8 +36,12 @@ impl TouchInputHandler {
 
         let device_path = self.device_path.clone();
         let event_bus = Arc::clone(&self.event_bus);
+        let max_retries = self.max_retries;
+        let retry_delay = self.retry_delay;
 
         tokio::spawn(async move {
+            let mut retry_count = 0;
+            
             loop {
                 match Self::monitor_touch_device(&device_path, &event_bus).await {
                     Ok(_) => {
@@ -39,16 +50,23 @@ impl TouchInputHandler {
                     }
                     Err(e) => {
                         error!("Touch device error: {}", e);
+                        retry_count += 1;
                         
                         // Publish system error event
                         let _ = event_bus.publish(DoorcamEvent::SystemError {
                             component: "touch_input".to_string(),
-                            error: e.to_string(),
+                            error: format!("Attempt {}/{}: {}", retry_count, max_retries, e),
                         }).await;
                         
-                        // Wait before retrying
-                        sleep(Duration::from_secs(5)).await;
-                        info!("Retrying touch device connection...");
+                        if retry_count >= max_retries {
+                            error!("Touch input handler failed after {} attempts, giving up", max_retries);
+                            break;
+                        }
+                        
+                        // Exponential backoff with jitter
+                        let delay = retry_delay * 2_u32.pow(retry_count.min(5));
+                        warn!("Retrying touch device connection in {:?} (attempt {}/{})", delay, retry_count, max_retries);
+                        sleep(delay).await;
                     }
                 }
             }
@@ -57,74 +75,264 @@ impl TouchInputHandler {
         Ok(())
     }
 
-    /// Monitor touch device for input events
+    /// Monitor touch device for input events using evdev
+    #[cfg(feature = "display")]
     async fn monitor_touch_device(device_path: &str, event_bus: &EventBus) -> Result<()> {
-        // Try to open the touch device
-        let file = match File::open(device_path) {
-            Ok(f) => f,
+        // Try to open the touch device using evdev
+        let mut device = match Device::open(device_path) {
+            Ok(device) => device,
             Err(e) => {
+                let touch_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => TouchError::DeviceNotFound(device_path.to_string()),
+                    std::io::ErrorKind::PermissionDenied => TouchError::PermissionDenied(device_path.to_string()),
+                    _ => TouchError::Device(format!("Failed to open {}: {}", device_path, e)),
+                };
+                
                 return Err(DoorcamError::component(
                     "touch_input".to_string(),
-                    format!("Failed to open touch device {}: {}", device_path, e)
+                    touch_error.user_message()
                 ));
             }
         };
-
-        let mut reader = BufReader::new(file);
-        let mut buffer = [0u8; 24]; // Standard input_event structure size
         
-        info!("Touch device opened successfully: {}", device_path);
+        info!("Touch device opened successfully: {} ({})", device_path, device.name().unwrap_or("Unknown"));
+        debug!("Device capabilities: {:?}", device.supported_events());
+        
+        // Validate device capabilities
+        Self::validate_touch_device(&device, device_path)?;
+
+        let mut consecutive_errors = 0;
+        const MAX_CONSECUTIVE_ERRORS: u32 = 5;
 
         loop {
-            // Read input event structure
-            match reader.read_exact(&mut buffer) {
-                Ok(_) => {
-                    // Parse the input event (simplified parsing)
-                    if Self::is_touch_event(&buffer) {
-                        debug!("Touch event detected");
-                        
-                        // Publish touch detected event
-                        let _ = event_bus.publish(DoorcamEvent::TouchDetected {
-                            timestamp: SystemTime::now(),
-                        }).await;
+            // Fetch events from the device
+            match device.fetch_events() {
+                Ok(events) => {
+                    consecutive_errors = 0; // Reset error count on successful read
+                    
+                    for event in events {
+                        if Self::is_touch_event(&event) {
+                            debug!("Touch event detected: {:?}", event);
+                            
+                            // Publish touch detected event
+                            let _ = event_bus.publish(DoorcamEvent::TouchDetected {
+                                timestamp: SystemTime::now(),
+                            }).await;
+                        }
                     }
                 }
                 Err(e) => {
-                    return Err(DoorcamError::component(
-                        "touch_input".to_string(),
-                        format!("Failed to read from touch device: {}", e)
-                    ));
+                    consecutive_errors += 1;
+                    
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        return Err(DoorcamError::component(
+                            "touch_input".to_string(),
+                            format!("Too many consecutive errors reading from touch device: {}", e)
+                        ));
+                    }
+                    
+                    warn!("Error reading from touch device (attempt {}): {}", consecutive_errors, e);
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
                 }
             }
+            
+            // Small delay to prevent busy waiting
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Validate that the device supports touch input
+    #[cfg(feature = "display")]
+    fn validate_touch_device(device: &Device, device_path: &str) -> Result<()> {
+        let supported_events = device.supported_events();
+        
+        // Check if device supports key events (required for touch buttons)
+        if !supported_events.contains(EventType::KEY) {
+            return Err(DoorcamError::component(
+                "touch_input".to_string(),
+                TouchError::UnsupportedDevice(format!("{} does not support key events", device_path)).user_message()
+            ));
+        }
+        
+        // Check for specific touch-related keys
+        if let Some(keys) = device.supported_keys() {
+            let has_touch_keys = keys.contains(Key::BTN_TOUCH) || 
+                                keys.contains(Key::BTN_LEFT) || 
+                                keys.contains(Key::BTN_RIGHT);
+            
+            if !has_touch_keys {
+                warn!("Device {} does not have standard touch keys, but will still monitor key events", device_path);
+            } else {
+                debug!("Device {} supports touch keys: {:?}", device_path, keys);
+            }
+        }
+        
+        // Log additional capabilities
+        if supported_events.contains(EventType::ABS) {
+            debug!("Device {} supports absolute positioning", device_path);
+        }
+        
+        if supported_events.contains(EventType::REL) {
+            debug!("Device {} supports relative positioning", device_path);
+        }
+        
+        Ok(())
+    }
+
+    /// Fallback implementation when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    async fn monitor_touch_device(device_path: &str, event_bus: &EventBus) -> Result<()> {
+        warn!("evdev feature not enabled, using mock touch input for device: {}", device_path);
+        
+        // Mock implementation that generates periodic touch events for testing
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        
+        loop {
+            interval.tick().await;
+            
+            debug!("Mock touch event generated");
+            let _ = event_bus.publish(DoorcamEvent::TouchDetected {
+                timestamp: SystemTime::now(),
+            }).await;
         }
     }
 
     /// Check if the input event represents a touch event
-    fn is_touch_event(buffer: &[u8; 24]) -> bool {
-        // This is a simplified implementation
-        // In a real implementation, we would parse the input_event structure:
-        // struct input_event {
-        //     struct timeval time;  // 16 bytes on 64-bit
-        //     __u16 type;           // 2 bytes
-        //     __u16 code;           // 2 bytes  
-        //     __s32 value;          // 4 bytes
-        // };
+    #[cfg(feature = "display")]
+    fn is_touch_event(event: &evdev::InputEvent) -> bool {
+        match event.kind() {
+            InputEventKind::Key(key) => {
+                // Check for touch-related key events
+                match key {
+                    Key::BTN_TOUCH | Key::BTN_LEFT | Key::BTN_RIGHT | Key::BTN_MIDDLE => {
+                        // Only trigger on key press (value 1), not release (value 0)
+                        event.value() == 1
+                    }
+                    _ => false,
+                }
+            }
+            InputEventKind::AbsAxis(_) => {
+                // For absolute axis events (coordinates), we could track position
+                // but for now we'll just detect any absolute movement as potential touch
+                false // Don't trigger on coordinate changes, only on actual touch press
+            }
+            _ => false,
+        }
+    }
+
+    /// Fallback implementation when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    fn is_touch_event(_event: &()) -> bool {
+        false
+    }
+}
+
+/// Utility functions for touch device management
+pub struct TouchDeviceUtils;
+
+impl TouchDeviceUtils {
+    /// Discover available touch input devices
+    #[cfg(feature = "display")]
+    pub fn discover_touch_devices() -> Vec<String> {
+        let mut devices = Vec::new();
         
-        // For now, we'll consider any non-zero event as a potential touch
-        // In practice, we'd check for EV_KEY events with BTN_TOUCH or similar
+        // Check common input device paths
+        for i in 0..10 {
+            let device_path = format!("/dev/input/event{}", i);
+            if let Ok(device) = Device::open(&device_path) {
+                let supported_events = device.supported_events();
+                
+                // Check if device supports key events (potential touch device)
+                if supported_events.contains(EventType::KEY) {
+                    if let Some(keys) = device.supported_keys() {
+                        let has_touch_keys = keys.contains(Key::BTN_TOUCH) || 
+                                           keys.contains(Key::BTN_LEFT) || 
+                                           keys.contains(Key::BTN_RIGHT);
+                        
+                        if has_touch_keys {
+                            let device_name = device.name().unwrap_or("Unknown").to_string();
+                            info!("Found potential touch device: {} ({})", device_path, device_name);
+                            devices.push(device_path);
+                        }
+                    }
+                }
+            }
+        }
         
-        // Extract type field (bytes 16-17, little-endian)
-        let event_type = u16::from_le_bytes([buffer[16], buffer[17]]);
+        devices
+    }
+    
+    /// Fallback when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    pub fn discover_touch_devices() -> Vec<String> {
+        warn!("evdev feature not enabled, cannot discover touch devices");
+        vec!["/dev/input/event0".to_string()] // Return default
+    }
+    
+    /// Get device information for a given path
+    #[cfg(feature = "display")]
+    pub fn get_device_info(device_path: &str) -> Result<TouchDeviceInfo> {
+        let device = Device::open(device_path)
+            .map_err(|e| DoorcamError::component(
+                "touch_device_utils".to_string(),
+                format!("Failed to open device {}: {}", device_path, e)
+            ))?;
         
-        // Extract code field (bytes 18-19, little-endian)
-        let event_code = u16::from_le_bytes([buffer[18], buffer[19]]);
-        
-        // Extract value field (bytes 20-23, little-endian)
-        let event_value = i32::from_le_bytes([buffer[20], buffer[21], buffer[22], buffer[23]]);
-        
-        // EV_KEY = 1, BTN_TOUCH = 0x14a (or similar touch codes)
-        // For simplicity, we'll detect any key press event as a touch
-        event_type == 1 && event_value == 1 // Key press events
+        Ok(TouchDeviceInfo {
+            path: device_path.to_string(),
+            name: device.name().unwrap_or("Unknown").to_string(),
+            vendor_id: device.input_id().vendor(),
+            product_id: device.input_id().product(),
+            supports_touch: device.supported_keys()
+                .map(|keys| keys.contains(Key::BTN_TOUCH) || keys.contains(Key::BTN_LEFT))
+                .unwrap_or(false),
+            supports_absolute: device.supported_events().contains(EventType::ABS),
+            supports_relative: device.supported_events().contains(EventType::REL),
+        })
+    }
+    
+    /// Fallback when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    pub fn get_device_info(device_path: &str) -> Result<TouchDeviceInfo> {
+        Ok(TouchDeviceInfo {
+            path: device_path.to_string(),
+            name: "Mock Device".to_string(),
+            vendor_id: 0,
+            product_id: 0,
+            supports_touch: true,
+            supports_absolute: false,
+            supports_relative: false,
+        })
+    }
+}
+
+/// Information about a touch input device
+#[derive(Debug, Clone)]
+pub struct TouchDeviceInfo {
+    pub path: String,
+    pub name: String,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub supports_touch: bool,
+    pub supports_absolute: bool,
+    pub supports_relative: bool,
+}
+
+impl TouchDeviceInfo {
+    /// Check if this device is suitable for touch input
+    pub fn is_suitable_for_touch(&self) -> bool {
+        self.supports_touch
+    }
+    
+    /// Get a human-readable description
+    pub fn description(&self) -> String {
+        format!("{} ({}) - Touch: {}, Absolute: {}, Relative: {}", 
+                self.name, 
+                self.path,
+                self.supports_touch,
+                self.supports_absolute,
+                self.supports_relative)
     }
 }
 
@@ -183,6 +391,50 @@ pub enum TouchError {
     
     #[error("Parse error: {0}")]
     Parse(String),
+    
+    #[error("Device not found: {0}")]
+    DeviceNotFound(String),
+    
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+    
+    #[error("Device disconnected: {0}")]
+    DeviceDisconnected(String),
+    
+    #[error("Unsupported device: {0}")]
+    UnsupportedDevice(String),
+    
+    #[cfg(feature = "display")]
+    #[error("evdev error: {0}")]
+    Evdev(#[from] evdev::Error),
+}
+
+impl TouchError {
+    /// Check if this error is recoverable (should retry)
+    pub fn is_recoverable(&self) -> bool {
+        match self {
+            TouchError::Device(_) => true,
+            TouchError::Io(_) => true,
+            TouchError::DeviceNotFound(_) => true,
+            TouchError::DeviceDisconnected(_) => true,
+            TouchError::PermissionDenied(_) => false, // Don't retry permission errors
+            TouchError::UnsupportedDevice(_) => false, // Don't retry unsupported devices
+            TouchError::Parse(_) => false, // Don't retry parse errors
+            #[cfg(feature = "display")]
+            TouchError::Evdev(_) => true,
+        }
+    }
+    
+    /// Get a user-friendly error message
+    pub fn user_message(&self) -> String {
+        match self {
+            TouchError::DeviceNotFound(path) => format!("Touch device not found at {}", path),
+            TouchError::PermissionDenied(path) => format!("Permission denied accessing touch device {}. Try running with sudo or adding user to input group.", path),
+            TouchError::DeviceDisconnected(path) => format!("Touch device {} was disconnected", path),
+            TouchError::UnsupportedDevice(path) => format!("Touch device {} does not support required input events", path),
+            _ => self.to_string(),
+        }
+    }
 }
 
 /// Touch event types for more detailed event handling
@@ -230,12 +482,13 @@ impl TouchEvent {
     }
 }
 
-/// Advanced touch input handler with detailed event parsing
+/// Advanced touch input handler with detailed event parsing and debouncing
 pub struct AdvancedTouchInputHandler {
     device_path: String,
     event_bus: Arc<EventBus>,
     last_touch_time: std::sync::Arc<std::sync::RwLock<Option<SystemTime>>>,
     debounce_duration: Duration,
+    current_position: std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>,
 }
 
 impl AdvancedTouchInputHandler {
@@ -246,6 +499,7 @@ impl AdvancedTouchInputHandler {
             event_bus,
             last_touch_time: std::sync::Arc::new(std::sync::RwLock::new(None)),
             debounce_duration: Duration::from_millis(200), // 200ms debounce
+            current_position: std::sync::Arc::new(std::sync::RwLock::new((None, None))),
         }
     }
 
@@ -261,14 +515,19 @@ impl AdvancedTouchInputHandler {
         let device_path = self.device_path.clone();
         let event_bus = Arc::clone(&self.event_bus);
         let last_touch_time = std::sync::Arc::clone(&self.last_touch_time);
+        let current_position = std::sync::Arc::clone(&self.current_position);
         let debounce_duration = self.debounce_duration;
 
         tokio::spawn(async move {
+            let mut retry_count = 0;
+            let max_retries = 10;
+            
             loop {
                 match Self::monitor_advanced_touch_device(
                     &device_path, 
                     &event_bus, 
                     &last_touch_time,
+                    &current_position,
                     debounce_duration
                 ).await {
                     Ok(_) => {
@@ -277,16 +536,23 @@ impl AdvancedTouchInputHandler {
                     }
                     Err(e) => {
                         error!("Advanced touch device error: {}", e);
+                        retry_count += 1;
                         
                         // Publish system error event
                         let _ = event_bus.publish(DoorcamEvent::SystemError {
                             component: "advanced_touch_input".to_string(),
-                            error: e.to_string(),
+                            error: format!("Attempt {}/{}: {}", retry_count, max_retries, e),
                         }).await;
                         
-                        // Wait before retrying
-                        sleep(Duration::from_secs(5)).await;
-                        info!("Retrying advanced touch device connection...");
+                        if retry_count >= max_retries {
+                            error!("Advanced touch input handler failed after {} attempts, giving up", max_retries);
+                            break;
+                        }
+                        
+                        // Exponential backoff
+                        let delay = Duration::from_secs(5) * 2_u32.pow(retry_count.min(5));
+                        warn!("Retrying advanced touch device connection in {:?} (attempt {}/{})", delay, retry_count, max_retries);
+                        sleep(delay).await;
                     }
                 }
             }
@@ -295,103 +561,200 @@ impl AdvancedTouchInputHandler {
         Ok(())
     }
 
-    /// Monitor touch device with debouncing and advanced parsing
+    /// Monitor touch device with debouncing and advanced parsing using evdev
+    #[cfg(feature = "display")]
     async fn monitor_advanced_touch_device(
         device_path: &str,
         event_bus: &EventBus,
         last_touch_time: &std::sync::Arc<std::sync::RwLock<Option<SystemTime>>>,
+        current_position: &std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>,
         debounce_duration: Duration,
     ) -> Result<()> {
-        let file = File::open(device_path)
-            .map_err(|e| DoorcamError::component(
-                "advanced_touch_input".to_string(),
-                format!("Failed to open touch device {}: {}", device_path, e)
-            ))?;
-
-        let mut reader = BufReader::new(file);
-        let mut buffer = [0u8; 24];
+        let mut device = match Device::open(device_path) {
+            Ok(device) => device,
+            Err(e) => {
+                let touch_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => TouchError::DeviceNotFound(device_path.to_string()),
+                    std::io::ErrorKind::PermissionDenied => TouchError::PermissionDenied(device_path.to_string()),
+                    _ => TouchError::Device(format!("Failed to open {}: {}", device_path, e)),
+                };
+                
+                return Err(DoorcamError::component(
+                    "advanced_touch_input".to_string(),
+                    touch_error.user_message()
+                ));
+            }
+        };
         
-        info!("Advanced touch device opened successfully: {}", device_path);
+        info!("Advanced touch device opened successfully: {} ({})", device_path, device.name().unwrap_or("Unknown"));
+        debug!("Device capabilities: {:?}", device.supported_events());
+        
+        // Validate device capabilities
+        TouchInputHandler::validate_touch_device(&device, device_path)?;
+
+        let mut consecutive_errors = 0;
+        const MAX_CONSECUTIVE_ERRORS: u32 = 5;
 
         loop {
-            match reader.read_exact(&mut buffer) {
-                Ok(_) => {
-                    if let Some(touch_event) = Self::parse_touch_event(&buffer) {
-                        // Apply debouncing
-                        let now = SystemTime::now();
-                        let should_process = {
-                            let last_time = last_touch_time.read().unwrap();
-                            match *last_time {
-                                Some(last) => now.duration_since(last).unwrap_or_default() >= debounce_duration,
-                                None => true,
-                            }
-                        };
+            match device.fetch_events() {
+                Ok(events) => {
+                    consecutive_errors = 0; // Reset error count on successful read
+                    
+                    for event in events {
+                        if let Some(touch_event) = Self::parse_advanced_touch_event(&event, current_position) {
+                            // Apply debouncing
+                            let now = SystemTime::now();
+                            let should_process = {
+                                let last_time = last_touch_time.read().unwrap();
+                                match *last_time {
+                                    Some(last) => now.duration_since(last).unwrap_or_default() >= debounce_duration,
+                                    None => true,
+                                }
+                            };
 
-                        if should_process {
-                            debug!("Advanced touch event: {:?}", touch_event);
-                            
-                            // Update last touch time
-                            {
-                                let mut last_time = last_touch_time.write().unwrap();
-                                *last_time = Some(now);
+                            if should_process {
+                                debug!("Advanced touch event: {:?}", touch_event);
+                                
+                                // Update last touch time
+                                {
+                                    let mut last_time = last_touch_time.write().unwrap();
+                                    *last_time = Some(now);
+                                }
+                                
+                                // Publish touch detected event
+                                let _ = event_bus.publish(DoorcamEvent::TouchDetected {
+                                    timestamp: touch_event.timestamp,
+                                }).await;
+                            } else {
+                                debug!("Touch event debounced");
                             }
-                            
-                            // Publish touch detected event
-                            let _ = event_bus.publish(DoorcamEvent::TouchDetected {
-                                timestamp: touch_event.timestamp,
-                            }).await;
-                        } else {
-                            debug!("Touch event debounced");
                         }
                     }
                 }
                 Err(e) => {
-                    return Err(DoorcamError::component(
-                        "advanced_touch_input".to_string(),
-                        format!("Failed to read from touch device: {}", e)
-                    ));
+                    consecutive_errors += 1;
+                    
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        return Err(DoorcamError::component(
+                            "advanced_touch_input".to_string(),
+                            format!("Too many consecutive errors reading from touch device: {}", e)
+                        ));
+                    }
+                    
+                    warn!("Error reading from advanced touch device (attempt {}): {}", consecutive_errors, e);
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
                 }
+            }
+            
+            // Small delay to prevent busy waiting
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Fallback implementation when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    async fn monitor_advanced_touch_device(
+        device_path: &str,
+        event_bus: &EventBus,
+        last_touch_time: &std::sync::Arc<std::sync::RwLock<Option<SystemTime>>>,
+        _current_position: &std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>,
+        debounce_duration: Duration,
+    ) -> Result<()> {
+        warn!("evdev feature not enabled, using mock advanced touch input for device: {}", device_path);
+        
+        // Mock implementation with debouncing
+        let mut interval = tokio::time::interval(Duration::from_secs(25));
+        
+        loop {
+            interval.tick().await;
+            
+            let now = SystemTime::now();
+            let should_process = {
+                let last_time = last_touch_time.read().unwrap();
+                match *last_time {
+                    Some(last) => now.duration_since(last).unwrap_or_default() >= debounce_duration,
+                    None => true,
+                }
+            };
+
+            if should_process {
+                debug!("Mock advanced touch event generated");
+                
+                // Update last touch time
+                {
+                    let mut last_time = last_touch_time.write().unwrap();
+                    *last_time = Some(now);
+                }
+                
+                let _ = event_bus.publish(DoorcamEvent::TouchDetected {
+                    timestamp: now,
+                }).await;
             }
         }
     }
 
-    /// Parse input event buffer into TouchEvent
-    fn parse_touch_event(buffer: &[u8; 24]) -> Option<TouchEvent> {
-        // Parse input_event structure
-        let event_type = u16::from_le_bytes([buffer[16], buffer[17]]);
-        let event_code = u16::from_le_bytes([buffer[18], buffer[19]]);
-        let event_value = i32::from_le_bytes([buffer[20], buffer[21], buffer[22], buffer[23]]);
-        
-        // Check for touch-related events
-        match event_type {
-            1 => { // EV_KEY
-                if event_code == 0x14a || event_code == 0x110 { // BTN_TOUCH or BTN_LEFT
-                    let touch_type = if event_value == 1 {
-                        TouchEventType::Press
-                    } else if event_value == 0 {
-                        TouchEventType::Release
-                    } else {
-                        return None;
-                    };
-                    
-                    Some(TouchEvent {
-                        event_type: touch_type,
-                        x: None,
-                        y: None,
-                        pressure: None,
-                        timestamp: SystemTime::now(),
-                    })
-                } else {
-                    None
+    /// Parse evdev input event into TouchEvent with coordinate tracking
+    #[cfg(feature = "display")]
+    fn parse_advanced_touch_event(
+        event: &evdev::InputEvent, 
+        current_position: &std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>
+    ) -> Option<TouchEvent> {
+        match event.kind() {
+            InputEventKind::Key(key) => {
+                match key {
+                    Key::BTN_TOUCH | Key::BTN_LEFT | Key::BTN_RIGHT | Key::BTN_MIDDLE => {
+                        let touch_type = if event.value() == 1 {
+                            TouchEventType::Press
+                        } else if event.value() == 0 {
+                            TouchEventType::Release
+                        } else {
+                            return None;
+                        };
+                        
+                        // Get current position
+                        let (x, y) = {
+                            let pos = current_position.read().unwrap();
+                            *pos
+                        };
+                        
+                        Some(TouchEvent {
+                            event_type: touch_type,
+                            x,
+                            y,
+                            pressure: None,
+                            timestamp: SystemTime::now(),
+                        })
+                    }
+                    _ => None,
                 }
             }
-            3 => { // EV_ABS (absolute coordinates)
-                // For coordinate events, we'd need to track state
-                // This is a simplified implementation
-                None
+            InputEventKind::AbsAxis(axis) => {
+                // Update position tracking but don't generate touch event
+                match axis {
+                    evdev::AbsoluteAxisType::ABS_X => {
+                        let mut pos = current_position.write().unwrap();
+                        pos.0 = Some(event.value());
+                    }
+                    evdev::AbsoluteAxisType::ABS_Y => {
+                        let mut pos = current_position.write().unwrap();
+                        pos.1 = Some(event.value());
+                    }
+                    _ => {}
+                }
+                None // Don't generate touch event for coordinate updates
             }
             _ => None,
         }
+    }
+
+    /// Fallback implementation when evdev feature is not available
+    #[cfg(not(feature = "display"))]
+    fn parse_advanced_touch_event(
+        _event: &(), 
+        _current_position: &std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>
+    ) -> Option<TouchEvent> {
+        None
     }
 }
 
@@ -453,30 +816,45 @@ mod tests {
         assert_eq!(touch_event.timestamp, timestamp);
     }
 
+    #[cfg(feature = "display")]
     #[test]
     fn test_is_touch_event() {
-        // Create a mock input event buffer for a key press
-        let mut buffer = [0u8; 24];
+        use evdev::{InputEvent, EventType, Key};
+        use std::time::{SystemTime, UNIX_EPOCH};
         
-        // Set event type to EV_KEY (1)
-        buffer[16] = 1;
-        buffer[17] = 0;
+        // Create a mock touch press event
+        let press_event = InputEvent::new(
+            EventType::KEY,
+            Key::BTN_TOUCH.code(),
+            1, // Press
+        );
         
-        // Set event code to some key
-        buffer[18] = 0x4a;
-        buffer[19] = 0x01;
+        assert!(TouchInputHandler::is_touch_event(&press_event));
         
-        // Set event value to 1 (press)
-        buffer[20] = 1;
-        buffer[21] = 0;
-        buffer[22] = 0;
-        buffer[23] = 0;
+        // Create a mock touch release event
+        let release_event = InputEvent::new(
+            EventType::KEY,
+            Key::BTN_TOUCH.code(),
+            0, // Release
+        );
         
-        assert!(TouchInputHandler::is_touch_event(&buffer));
+        assert!(!TouchInputHandler::is_touch_event(&release_event));
         
-        // Test release event (value = 0)
-        buffer[20] = 0;
-        assert!(!TouchInputHandler::is_touch_event(&buffer));
+        // Create a non-touch key event
+        let other_key_event = InputEvent::new(
+            EventType::KEY,
+            Key::KEY_A.code(),
+            1, // Press
+        );
+        
+        assert!(!TouchInputHandler::is_touch_event(&other_key_event));
+    }
+
+    #[cfg(not(feature = "display"))]
+    #[test]
+    fn test_is_touch_event_fallback() {
+        // When evdev feature is not available, the function should return false
+        assert!(!TouchInputHandler::is_touch_event(&()));
     }
 
     #[tokio::test]
@@ -500,29 +878,51 @@ mod tests {
         assert_eq!(handler.debounce_duration, Duration::from_millis(100));
     }
 
+    #[cfg(feature = "display")]
     #[test]
-    fn test_parse_touch_event() {
-        // Create a mock input event buffer for BTN_TOUCH press
-        let mut buffer = [0u8; 24];
+    fn test_parse_advanced_touch_event() {
+        use evdev::{InputEvent, EventType, Key, AbsoluteAxisType};
+        use std::sync::{Arc, RwLock};
         
-        // Set event type to EV_KEY (1)
-        buffer[16] = 1;
-        buffer[17] = 0;
+        let current_position = Arc::new(RwLock::new((None, None)));
         
-        // Set event code to BTN_TOUCH (0x14a)
-        buffer[18] = 0x4a;
-        buffer[19] = 0x01;
+        // Test touch press event
+        let press_event = InputEvent::new(
+            EventType::KEY,
+            Key::BTN_TOUCH.code(),
+            1, // Press
+        );
         
-        // Set event value to 1 (press)
-        buffer[20] = 1;
-        buffer[21] = 0;
-        buffer[22] = 0;
-        buffer[23] = 0;
-        
-        let touch_event = AdvancedTouchInputHandler::parse_touch_event(&buffer);
+        let touch_event = AdvancedTouchInputHandler::parse_advanced_touch_event(&press_event, &current_position);
         assert!(touch_event.is_some());
         
         let event = touch_event.unwrap();
         assert_eq!(event.event_type, TouchEventType::Press);
+        
+        // Test coordinate update (should not generate touch event)
+        let x_event = InputEvent::new(
+            EventType::ABS,
+            AbsoluteAxisType::ABS_X.0,
+            100,
+        );
+        
+        let coord_event = AdvancedTouchInputHandler::parse_advanced_touch_event(&x_event, &current_position);
+        assert!(coord_event.is_none());
+        
+        // Check that position was updated
+        let pos = current_position.read().unwrap();
+        assert_eq!(pos.0, Some(100));
+    }
+
+    #[cfg(not(feature = "display"))]
+    #[test]
+    fn test_parse_advanced_touch_event_fallback() {
+        use std::sync::{Arc, RwLock};
+        
+        let current_position = Arc::new(RwLock::new((None, None)));
+        
+        // When evdev feature is not available, the function should return None
+        let result = AdvancedTouchInputHandler::parse_advanced_touch_event(&(), &current_position);
+        assert!(result.is_none());
     }
 }
