@@ -74,10 +74,6 @@ display = ["dep:evdev"]
 name = "doorcam"
 path = "src/main.rs"
 
-[[bin]]
-name = "test_stream"
-path = "test_stream.rs"
-
 [[example]]
 name = "display_demo"
 path = "examples/display_demo.rs"
