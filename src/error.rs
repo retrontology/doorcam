@@ -22,6 +22,9 @@ pub enum DoorcamError {
     
     #[error("Motion analysis error: {0}")]
     MotionAnalysis(String),
+    
+    #[error("Storage error: {0}")]
+    Storage(String),
 }
 
 impl DoorcamError {

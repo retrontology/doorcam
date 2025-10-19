@@ -12,6 +12,8 @@ pub mod touch;
 pub mod display_integration;
 pub mod capture;
 pub mod capture_integration;
+pub mod storage;
+pub mod storage_integration;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -37,6 +39,8 @@ pub use touch::{TouchInputHandler, MockTouchInputHandler, AdvancedTouchInputHand
 pub use display_integration::{DisplayIntegration, DisplayIntegrationBuilder, DisplayIntegrationWithStats, DisplayStats};
 pub use capture::{VideoCapture, CaptureStats, CaptureMetadata};
 pub use capture_integration::{VideoCaptureIntegration, VideoCaptureIntegrationBuilder};
+pub use storage::{EventStorage, StoredEventMetadata, StoredEventType, StorageStats, CleanupResult};
+pub use storage_integration::{EventStorageIntegration, EventStorageIntegrationBuilder, StorageIntegrationStats, CombinedStorageStats, StorageHealthStatus, HealthStatus as StorageHealthStatusLevel};
 
 #[cfg(feature = "streaming")]
 pub use streaming::{StreamServer, StreamServerBuilder, StreamStats};
