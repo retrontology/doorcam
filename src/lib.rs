@@ -7,6 +7,9 @@ pub mod camera;
 pub mod integration;
 pub mod analyzer;
 pub mod analyzer_integration;
+pub mod display;
+pub mod touch;
+pub mod display_integration;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -27,6 +30,9 @@ pub use camera::{CameraInterface, CameraInterfaceBuilder, CameraError};
 pub use integration::{CameraRingBufferIntegration, CameraRingBufferIntegrationBuilder, IntegrationStatus, HealthCheckResult, HealthStatus};
 pub use analyzer::MotionAnalyzer;
 pub use analyzer_integration::{MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder, MotionAnalysisMetrics};
+pub use display::{DisplayController, DisplayConverter, DisplayError};
+pub use touch::{TouchInputHandler, MockTouchInputHandler, AdvancedTouchInputHandler, TouchEvent, TouchEventType, TouchError};
+pub use display_integration::{DisplayIntegration, DisplayIntegrationBuilder, DisplayIntegrationWithStats, DisplayStats};
 
 #[cfg(feature = "streaming")]
 pub use streaming::{StreamServer, StreamServerBuilder, StreamStats};

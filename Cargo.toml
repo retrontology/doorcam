@@ -77,3 +77,7 @@ streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep
 [[bin]]
 name = "doorcam"
 path = "src/main.rs"
+
+[[example]]
+name = "display_demo"
+path = "examples/display_demo.rs"

@@ -329,9 +329,13 @@ mod tests {
         let config = create_test_config();
         let integration = CameraRingBufferIntegration::new(config).await.unwrap();
         
-        // Start integration
-        let result = integration.start().await;
-        assert!(result.is_ok());
+        // Start integration with timeout
+        let start_result = tokio::time::timeout(
+            Duration::from_millis(200),
+            integration.start()
+        ).await;
+        assert!(start_result.is_ok());
+        assert!(start_result.unwrap().is_ok());
         assert!(integration.camera().is_capturing());
         
         // Wait for frames (with short timeout for mock mode)
@@ -343,9 +347,13 @@ mod tests {
         assert!(status.camera_capturing);
         assert!(status.frames_pushed > 0);
         
-        // Stop integration
-        let result = integration.stop().await;
-        assert!(result.is_ok());
+        // Stop integration with timeout
+        let stop_result = tokio::time::timeout(
+            Duration::from_millis(200),
+            integration.stop()
+        ).await;
+        assert!(stop_result.is_ok());
+        assert!(stop_result.unwrap().is_ok());
         assert!(!integration.camera().is_capturing());
     }
     
@@ -359,8 +367,13 @@ mod tests {
         assert_eq!(health.status, HealthStatus::Unhealthy);
         assert!(!health.issues.is_empty());
         
-        // Start and check again
-        integration.start().await.unwrap();
+        // Start and check again with timeout
+        let start_result = tokio::time::timeout(
+            Duration::from_millis(200),
+            integration.start()
+        ).await;
+        assert!(start_result.is_ok());
+        assert!(start_result.unwrap().is_ok());
         
         // Wait for frames
         let _ = integration.wait_for_frames(Duration::from_millis(200)).await;
@@ -375,13 +388,22 @@ mod tests {
         let config = create_test_config();
         let integration = CameraRingBufferIntegration::new(config).await.unwrap();
         
-        // Start capture
-        integration.start().await.unwrap();
+        // Start capture with timeout
+        let start_result = tokio::time::timeout(
+            Duration::from_millis(200),
+            integration.start()
+        ).await;
+        assert!(start_result.is_ok());
+        assert!(start_result.unwrap().is_ok());
         assert!(integration.camera().is_capturing());
         
-        // Restart capture
-        let result = integration.restart_capture().await;
-        assert!(result.is_ok());
+        // Restart capture with timeout
+        let restart_result = tokio::time::timeout(
+            Duration::from_secs(1),
+            integration.restart_capture()
+        ).await;
+        assert!(restart_result.is_ok());
+        assert!(restart_result.unwrap().is_ok());
         assert!(integration.camera().is_capturing());
     }
 }
