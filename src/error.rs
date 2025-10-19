@@ -88,9 +88,7 @@ pub enum CameraError {
     #[error("Frame timeout after {timeout:?}")]
     FrameTimeout { timeout: Duration },
     
-    #[cfg(all(feature = "camera", target_os = "linux"))]
-    #[error("V4L2 error: {0}")]
-    V4l2(#[from] v4l::Error),
+
 }
 
 /// Motion analyzer error types

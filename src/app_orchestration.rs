@@ -1,6 +1,10 @@
 use crate::config::DoorcamConfig;
 use crate::error::{DoorcamError, Result};
 use crate::events::EventBus;
+use crate::ring_buffer::RingBuffer;
+
+#[cfg(feature = "streaming")]
+use crate::streaming::StreamServer;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,8 +35,13 @@ pub enum ShutdownReason {
 
 /// Main application coordinator that manages all system components
 pub struct DoorcamOrchestrator {
-    _config: DoorcamConfig,
-    _event_bus: Arc<EventBus>,
+    config: DoorcamConfig,
+    event_bus: Arc<EventBus>,
+    ring_buffer: Arc<RingBuffer>,
+    
+    // Components
+    #[cfg(feature = "streaming")]
+    stream_server: Option<StreamServer>,
     
     // Lifecycle management
     component_states: Arc<Mutex<HashMap<String, ComponentState>>>,
@@ -44,11 +53,25 @@ impl DoorcamOrchestrator {
     /// Create a new orchestrator with the given configuration
     pub fn new(config: DoorcamConfig) -> Result<Self> {
         let event_bus = Arc::new(EventBus::new(config.system.event_bus_capacity));
+        let ring_buffer = Arc::new(RingBuffer::new(
+            config.system.ring_buffer_capacity,
+            Duration::from_secs(config.capture.preroll_seconds as u64),
+        ));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         
+        #[cfg(feature = "streaming")]
+        let stream_server = Some(StreamServer::new(
+            config.stream.clone(),
+            Arc::clone(&ring_buffer),
+            Arc::clone(&event_bus),
+        ));
+        
         Ok(Self {
-            _config: config,
-            _event_bus: event_bus,
+            config,
+            event_bus,
+            ring_buffer,
+            #[cfg(feature = "streaming")]
+            stream_server,
             component_states: Arc::new(Mutex::new(HashMap::new())),
             shutdown_sender: Some(shutdown_sender),
             shutdown_receiver: Some(shutdown_receiver),
@@ -80,16 +103,35 @@ impl DoorcamOrchestrator {
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting Doorcam system");
         
-        // For now, just mark components as running
+        // Start streaming server if enabled
+        #[cfg(feature = "streaming")]
+        if let Some(stream_server) = &self.stream_server {
+            self.set_component_state("streaming", ComponentState::Starting).await;
+            
+            let server = StreamServer::new(
+                self.config.stream.clone(),
+                Arc::clone(&self.ring_buffer),
+                Arc::clone(&self.event_bus),
+            );
+            
+            // Start the server in a background task
+            tokio::spawn(async move {
+                if let Err(e) = server.start().await {
+                    error!("Stream server error: {}", e);
+                }
+            });
+            
+            self.set_component_state("streaming", ComponentState::Running).await;
+            info!("Streaming server started on {}:{}", self.config.stream.ip, self.config.stream.port);
+        }
+        
+        // For now, just mark other components as running
         // TODO: Initialize actual components when integration builders are available
         self.set_component_state("camera", ComponentState::Running).await;
         self.set_component_state("analyzer", ComponentState::Running).await;
         self.set_component_state("display", ComponentState::Running).await;
         self.set_component_state("capture", ComponentState::Running).await;
         self.set_component_state("storage", ComponentState::Running).await;
-        
-        #[cfg(feature = "streaming")]
-        self.set_component_state("streaming", ComponentState::Running).await;
         
         info!("Doorcam system started successfully");
         Ok(())

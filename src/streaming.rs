@@ -392,21 +392,21 @@ impl StreamServerBuilder {
     /// Build the stream server
     pub fn build(self) -> Result<StreamServer> {
         let config = self.config.ok_or_else(|| {
-            StreamError::StartupFailed { 
+            DoorcamError::Stream(StreamError::StartupFailed { 
                 details: "Stream configuration is required".to_string() 
-            }.into()
+            })
         })?;
 
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
-            StreamError::StartupFailed { 
+            DoorcamError::Stream(StreamError::StartupFailed { 
                 details: "Ring buffer is required".to_string() 
-            }.into()
+            })
         })?;
 
         let event_bus = self.event_bus.ok_or_else(|| {
-            StreamError::StartupFailed { 
+            DoorcamError::Stream(StreamError::StartupFailed { 
                 details: "Event bus is required".to_string() 
-            }.into()
+            })
         })?;
 
         Ok(StreamServer::new(config, ring_buffer, event_bus))

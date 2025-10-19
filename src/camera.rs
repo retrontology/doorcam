@@ -12,6 +12,8 @@ use tracing::{debug, error, info, trace, warn};
 #[cfg(all(feature = "camera", target_os = "linux"))]
 use v4l::prelude::*;
 #[cfg(all(feature = "camera", target_os = "linux"))]
+use v4l::video::Capture;
+#[cfg(all(feature = "camera", target_os = "linux"))]
 use v4l::buffer::Type;
 #[cfg(all(feature = "camera", target_os = "linux"))]
 use v4l::io::mmap::Stream;
@@ -58,11 +60,11 @@ impl CameraInterface {
         let device_path = format!("/dev/video{}", self.config.index);
         debug!("Opening V4L2 device: {}", device_path);
         
-        let device = v4l::Device::new(&device_path)
-            .map_err(|e| CameraError::DeviceOpenWithSource {
+        let device = v4l::Device::new(self.config.index as usize)
+            .map_err(|e| DoorcamError::Camera(CameraError::DeviceOpenWithSource {
                 device: self.config.index,
                 details: e.to_string(),
-            })?;
+            }))?;
         
         // Configure video format
         let mut fmt = device.format()
@@ -141,7 +143,7 @@ impl CameraInterface {
     
     /// Parse format string to V4L2 FourCC
     #[cfg(all(feature = "camera", target_os = "linux"))]
-    fn parse_format(&self, format: &str) -> Result<v4l::FourCC, CameraError> {
+    fn parse_format(&self, format: &str) -> std::result::Result<v4l::FourCC, CameraError> {
         match format.to_uppercase().as_str() {
             "MJPG" | "MJPEG" => Ok(v4l::FourCC::new(b"MJPG")),
             "YUYV" => Ok(v4l::FourCC::new(b"YUYV")),
@@ -238,7 +240,7 @@ impl CameraInterface {
         ring_buffer: &Arc<RingBuffer>,
         config: &CameraConfig,
         frame_counter: &AtomicU64,
-    ) -> Result<(), CameraError> {
+    ) -> Result<()> {
         let mut stream = Stream::with_buffers(device, Type::VideoCapture, 4)
             .map_err(|e| CameraError::CaptureStream { 
                 details: format!("Failed to create stream: {}", e) 
@@ -296,9 +298,9 @@ impl CameraInterface {
                 }
                 Err(e) => {
                     error!("Frame capture error: {}", e);
-                    return Err(CameraError::CaptureStream { 
+                    return Err(DoorcamError::Camera(CameraError::CaptureStream { 
                         details: format!("Capture failed: {}", e) 
-                    });
+                    }));
                 }
             }
         }
@@ -478,7 +480,7 @@ impl CameraInterface {
             info!("Reinitializing camera device {}", self.config.index);
             
             let device_path = format!("/dev/video{}", self.config.index);
-            let device = v4l::Device::new(&device_path)
+            let device = v4l::Device::new(self.config.index as usize)
                 .map_err(|e| CameraError::DeviceOpenWithSource {
                     device: self.config.index,
                     details: e.to_string(),
@@ -492,7 +494,7 @@ impl CameraInterface {
             
             fmt.width = self.config.resolution.0;
             fmt.height = self.config.resolution.1;
-            fmt.fourcc = self.format_to_fourcc(&self.config.format)?;
+            fmt.fourcc = self.parse_format(&self.config.format)?;
             
             device.set_format(&fmt)
                 .map_err(|e| CameraError::Configuration { 
