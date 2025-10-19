@@ -168,3 +168,5 @@ doorcam.local.toml
 /var/
 /tmp/
 *.sock
+
+config.toml
