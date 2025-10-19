@@ -1,0 +1,94 @@
+# Doorcam Configuration File
+# This file contains all configuration options for the Rust-based doorcam system.
+# All values shown are defaults and can be overridden by environment variables
+# using the DOORCAM_ prefix (e.g., DOORCAM_CAMERA_INDEX=1)
+
+[camera]
+# Camera device index (0 = /dev/video0, 1 = /dev/video1, etc.)
+index = 0
+
+# Camera resolution as [width, height]
+resolution = [640, 480]
+
+# Maximum frames per second for camera capture
+max_fps = 30
+
+# Video format - supported: "MJPG", "YUYV", "RGB24"
+format = "MJPG"
+
+# Optional frame rotation - uncomment to enable
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+[analyzer]
+# Maximum FPS for motion analysis (lower = less CPU usage)
+max_fps = 5
+
+# Delta threshold for background subtraction (higher = less sensitive)
+delta_threshold = 25
+
+# Minimum contour area to trigger motion detection (pixels)
+contour_minimum_area = 1000.0
+
+[capture]
+# Preroll duration in seconds (how much video before motion to save)
+preroll_seconds = 5
+
+# Postroll duration in seconds (how long to record after motion stops)
+postroll_seconds = 10
+
+# Base directory for storing captured events
+path = "./captures"
+
+# Add timestamp overlay to captured images
+timestamp_overlay = true
+
+# Enable video encoding (requires hardware acceleration)
+video_encoding = false
+
+# Keep individual JPEG images (in addition to video if enabled)
+keep_images = true
+
+[stream]
+# IP address to bind MJPEG stream server (0.0.0.0 = all interfaces)
+ip = "0.0.0.0"
+
+# Port for MJPEG stream server
+port = 8080
+
+[display]
+# Framebuffer device for HyperPixel display
+framebuffer_device = "/dev/fb0"
+
+# Backlight control device
+backlight_device = "/sys/class/backlight/rpi_backlight/brightness"
+
+# Touch input device
+touch_device = "/dev/input/event0"
+
+# How long to keep display active after motion/touch (seconds)
+activation_period_seconds = 30
+
+# Optional display rotation - uncomment to enable
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+[system]
+# Enable automatic cleanup of old capture events
+trim_old = true
+
+# How many days to keep capture events (if trim_old is enabled)
+retention_days = 7
+
+# Ring buffer capacity (number of frames to keep in memory)
+# Higher values = more preroll capability but more memory usage
+# Calculate as: preroll_seconds * camera_fps * safety_factor
+ring_buffer_capacity = 150
+
+# Event bus capacity (number of events that can be queued)
+event_bus_capacity = 100
+
+# Example environment variable overrides:
+# DOORCAM_CAMERA_INDEX=1
+# DOORCAM_CAMERA_RESOLUTION="[1280, 720]"
+# DOORCAM_STREAM_PORT=9090
+# DOORCAM_CAPTURE_PATH="/var/lib/doorcam/captures"
+# DOORCAM_SYSTEM_TRIM_OLD=false

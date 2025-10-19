@@ -1,0 +1,61 @@
+[package]
+name = "doorcam"
+version = "0.1.0"
+edition = "2021"
+authors = ["Doorcam Team"]
+description = "Rust-based door camera system with motion detection and streaming"
+license = "MIT"
+
+[dependencies]
+# Configuration management
+serde = { version = "1.0", features = ["derive"] }
+config = "0.14"
+toml = "0.8"
+
+# Async runtime and utilities
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = "0.7"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Atomic operations and concurrency
+crossbeam = "0.8"
+parking_lot = "0.12"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Video and image processing (will be used in later tasks)
+# opencv = { version = "0.88", optional = true }
+# v4l = { version = "0.14", optional = true }
+
+# HTTP server (will be used in later tasks)
+# axum = { version = "0.7", optional = true }
+# tower = { version = "0.4", optional = true }
+
+# Async streams
+# async-stream = { version = "0.3", optional = true }
+# futures = { version = "0.3", optional = true }
+
+# Input device handling (will be used in later tasks)
+# evdev = { version = "0.12", optional = true }
+
+[features]
+default = []
+# camera = ["opencv", "v4l"]
+# streaming = ["axum", "tower", "async-stream", "futures"]
+# display = ["evdev"]
+
+[[bin]]
+name = "doorcam"
+path = "src/main.rs"
