@@ -137,13 +137,56 @@ pub struct ProcessedFrame {
 
 impl ProcessedFrame {
     /// Create a processed frame from original frame data
-    pub fn from_frame(frame: FrameData) -> Self {
+    pub fn new(frame: FrameData) -> Self {
         Self {
             original: frame,
             rotated: None,
             jpeg_encoded: None,
             display_ready: None,
         }
+    }
+
+    /// Create a processed frame from original frame data with optional rotation
+    pub async fn from_frame(frame: FrameData, rotation: Option<Rotation>) -> Result<Self, crate::error::DoorcamError> {
+        let mut processed = Self {
+            original: frame,
+            rotated: None,
+            jpeg_encoded: None,
+            display_ready: None,
+        };
+
+        // Apply rotation if specified
+        if let Some(rot) = rotation {
+            processed.rotated = Some(FrameProcessor::apply_rotation(&processed.original, rot).await?);
+        }
+
+        Ok(processed)
+    }
+    
+    /// Get JPEG encoded data, encoding if necessary
+    pub async fn get_jpeg(&self) -> Result<Arc<Vec<u8>>, crate::error::DoorcamError> {
+        // Return cached JPEG if available
+        if let Some(ref jpeg) = self.jpeg_encoded {
+            return Ok(Arc::clone(jpeg));
+        }
+
+        // Use rotated data if available, otherwise original
+        let source_frame = if self.rotated.is_some() {
+            // Create a temporary frame with rotated data for encoding
+            FrameData {
+                id: self.original.id,
+                timestamp: self.original.timestamp,
+                data: Arc::clone(self.rotated.as_ref().unwrap()),
+                width: self.original.width,
+                height: self.original.height,
+                format: self.original.format,
+            }
+        } else {
+            self.original.clone()
+        };
+
+        // Encode to JPEG
+        FrameProcessor::encode_jpeg(&source_frame).await
     }
     
     /// Get the most appropriate frame data for the requested purpose
@@ -358,7 +401,7 @@ mod tests {
             FrameFormat::Mjpeg,
         );
         
-        let processed = ProcessedFrame::from_frame(frame);
+        let processed = ProcessedFrame::new(frame);
         
         // Should return original data when no processing is done
         assert_eq!(

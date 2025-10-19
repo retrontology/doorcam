@@ -1,0 +1,22 @@
+{
+  "event_id": "3a30c86a-0c51-4b3b-b305-db87f431fbe1",
+  "start_time": {
+    "secs_since_epoch": 1760897124,
+    "nanos_since_epoch": 984414000
+  },
+  "motion_detected_time": {
+    "secs_since_epoch": 1760897125,
+    "nanos_since_epoch": 483637800
+  },
+  "preroll_frame_count": 20,
+  "postroll_frame_count": 10,
+  "total_frame_count": 30,
+  "config": {
+    "preroll_seconds": 2,
+    "postroll_seconds": 1,
+    "path": "./test_captures",
+    "timestamp_overlay": true,
+    "video_encoding": false,
+    "keep_images": true
+  }
+}

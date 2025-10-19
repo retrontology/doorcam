@@ -168,14 +168,23 @@
     - Add touch input error handling and recovery
     - _Requirements: 4.4_
 
-- [ ] 10. Implement video capture system
-  - [ ] 10.1 Create motion-triggered recording
+- [x] 10. Implement video capture system
+
+
+
+
+
+  - [x] 10.1 Create motion-triggered recording
+
+
     - Implement event-driven capture start/stop
     - Add preroll frame retrieval from ring buffer
     - Implement postroll recording duration
     - _Requirements: 2.1, 2.2, 2.3_
 
-  - [ ] 10.2 Add frame processing and storage
+  - [x] 10.2 Add frame processing and storage
+
+
     - Implement JPEG frame saving to timestamped directories
     - Add frame rotation during post-processing
     - Create video encoding with hardware acceleration

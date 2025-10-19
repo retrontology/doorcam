@@ -10,6 +10,8 @@ pub mod analyzer_integration;
 pub mod display;
 pub mod touch;
 pub mod display_integration;
+pub mod capture;
+pub mod capture_integration;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -33,6 +35,8 @@ pub use analyzer_integration::{MotionAnalyzerIntegration, MotionAnalyzerIntegrat
 pub use display::{DisplayController, DisplayConverter, DisplayError};
 pub use touch::{TouchInputHandler, MockTouchInputHandler, AdvancedTouchInputHandler, TouchEvent, TouchEventType, TouchError};
 pub use display_integration::{DisplayIntegration, DisplayIntegrationBuilder, DisplayIntegrationWithStats, DisplayStats};
+pub use capture::{VideoCapture, CaptureStats, CaptureMetadata};
+pub use capture_integration::{VideoCaptureIntegration, VideoCaptureIntegrationBuilder};
 
 #[cfg(feature = "streaming")]
 pub use streaming::{StreamServer, StreamServerBuilder, StreamStats};
