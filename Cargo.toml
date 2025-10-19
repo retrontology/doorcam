@@ -38,9 +38,11 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Video and image processing (Linux only)
 v4l = { version = "0.14", optional = true }
+opencv = { version = "0.92", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 v4l = { version = "0.14", optional = true }
+opencv = { version = "0.92", optional = true }
 
 # HTTP server (will be used in later tasks)
 # axum = { version = "0.7", optional = true }
@@ -56,6 +58,7 @@ v4l = { version = "0.14", optional = true }
 [features]
 default = []
 camera = ["dep:v4l"]
+motion_analysis = ["dep:opencv"]
 # streaming = ["axum", "tower", "async-stream", "futures"]
 # display = ["evdev"]
 

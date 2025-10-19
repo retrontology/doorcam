@@ -85,14 +85,23 @@
     - Add event logging and debugging support
     - _Requirements: 7.1, 7.2_
 
-- [ ] 6. Implement motion detection analyzer
-  - [ ] 6.1 Create OpenCV-based motion analyzer
+- [x] 6. Implement motion detection analyzer
+
+
+
+
+
+  - [x] 6.1 Create OpenCV-based motion analyzer
+
+
     - Implement background subtraction using MOG2
     - Add contour detection and area filtering
     - Configure motion detection thresholds
     - _Requirements: 1.2, 1.3, 1.4, 12.3_
 
-  - [ ] 6.2 Integrate motion analyzer with ring buffer and events
+  - [x] 6.2 Integrate motion analyzer with ring buffer and events
+
+
     - Connect analyzer to ring buffer frame stream
     - Publish motion detection events to event bus
     - Add motion detection logging and metrics

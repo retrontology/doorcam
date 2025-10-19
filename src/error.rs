@@ -19,6 +19,9 @@ pub enum DoorcamError {
     
     #[error("Component error in {component}: {message}")]
     Component { component: String, message: String },
+    
+    #[error("Motion analysis error: {0}")]
+    MotionAnalysis(String),
 }
 
 impl DoorcamError {
