@@ -1,5 +1,5 @@
 use crate::camera::{CameraInterface, CameraInterfaceBuilder};
-use crate::config::{CameraConfig, DoorcamConfig};
+use crate::config::DoorcamConfig;
 use crate::error::{DoorcamError, Result};
 use crate::ring_buffer::{RingBuffer, RingBufferBuilder};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 pub struct CameraRingBufferIntegration {
     camera: CameraInterface,
     ring_buffer: Arc<RingBuffer>,
-    config: DoorcamConfig,
+    _config: DoorcamConfig,
 }
 
 impl CameraRingBufferIntegration {
@@ -44,7 +44,7 @@ impl CameraRingBufferIntegration {
         Ok(Self {
             camera,
             ring_buffer: Arc::new(ring_buffer),
-            config,
+            _config: config,
         })
     }
     

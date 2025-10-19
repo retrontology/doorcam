@@ -2,13 +2,13 @@ use crate::{
     config::CaptureConfig,
     error::{CaptureError, DoorcamError, Result},
     events::{DoorcamEvent, EventBus},
-    frame::{FrameData, FrameFormat, ProcessedFrame, Rotation},
+    frame::{FrameData, ProcessedFrame},
     ring_buffer::RingBuffer,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::RwLock;
 use tokio::fs;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -31,7 +31,7 @@ struct ActiveCapture {
     motion_detected_time: SystemTime,
     preroll_frames: Vec<FrameData>,
     postroll_frames: Vec<FrameData>,
-    is_recording_postroll: bool,
+    _is_recording_postroll: bool,
 }
 
 impl VideoCapture {
@@ -112,7 +112,7 @@ impl VideoCapture {
             motion_detected_time: motion_time,
             preroll_frames,
             postroll_frames: Vec::new(),
-            is_recording_postroll: true,
+            _is_recording_postroll: true,
         };
 
         // Add to active captures

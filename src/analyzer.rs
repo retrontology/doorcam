@@ -1,12 +1,10 @@
 use crate::config::AnalyzerConfig;
 use crate::events::{DoorcamEvent, EventBus};
-use crate::frame::{FrameData, FrameFormat};
-use crate::ring_buffer::RingBuffer;
-use crate::error::{AnalyzerError, DoorcamError, Result};
+use crate::frame::FrameData;
 
-use std::sync::Arc;
+use crate::error::Result;
+
 use std::time::SystemTime;
-use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "motion_analysis")]
@@ -116,7 +114,7 @@ impl MotionAnalyzer {
     }
     
     /// Detect motion in a single frame
-    async fn detect_motion(&mut self, frame: &FrameData) -> Result<Option<f64>> {
+    async fn detect_motion(&mut self, _frame: &FrameData) -> Result<Option<f64>> {
         #[cfg(feature = "motion_analysis")]
         {
             debug!("Analyzing frame {} for motion ({}x{}, {:?})", 

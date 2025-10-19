@@ -1,9 +1,9 @@
-use crate::error::{DoorcamError, Result};
+use crate::error::Result;
 use crate::recovery::{HealthMonitor, ComponentHealth, GracefulDegradation};
 use crate::events::{DoorcamEvent, EventBus};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::time::{interval, sleep};
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 /// System health manager that monitors all components
@@ -12,7 +12,7 @@ pub struct SystemHealthManager {
     degradation: Arc<tokio::sync::Mutex<GracefulDegradation>>,
     event_bus: Arc<EventBus>,
     health_check_interval: Duration,
-    last_health_report: Instant,
+    _last_health_report: Instant,
     health_report_interval: Duration,
 }
 
@@ -24,7 +24,7 @@ impl SystemHealthManager {
             degradation: Arc::new(tokio::sync::Mutex::new(GracefulDegradation::new())),
             event_bus,
             health_check_interval: Duration::from_secs(30),
-            last_health_report: Instant::now(),
+            _last_health_report: Instant::now(),
             health_report_interval: Duration::from_secs(300), // 5 minutes
         }
     }
@@ -195,7 +195,7 @@ impl SystemHealthManager {
 /// Component health checker trait
 pub trait HealthChecker {
     /// Perform a health check on the component
-    async fn check_health(&self) -> ComponentHealth;
+    fn check_health(&self) -> impl std::future::Future<Output = ComponentHealth> + Send;
     
     /// Get the component name for health monitoring
     fn component_name(&self) -> &'static str;

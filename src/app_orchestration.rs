@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::signal;
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Component lifecycle states
 #[derive(Debug, Clone, PartialEq)]
@@ -31,8 +31,8 @@ pub enum ShutdownReason {
 
 /// Main application coordinator that manages all system components
 pub struct DoorcamOrchestrator {
-    config: DoorcamConfig,
-    event_bus: Arc<EventBus>,
+    _config: DoorcamConfig,
+    _event_bus: Arc<EventBus>,
     
     // Lifecycle management
     component_states: Arc<Mutex<HashMap<String, ComponentState>>>,
@@ -47,8 +47,8 @@ impl DoorcamOrchestrator {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         
         Ok(Self {
-            config,
-            event_bus,
+            _config: config,
+            _event_bus: event_bus,
             component_states: Arc::new(Mutex::new(HashMap::new())),
             shutdown_sender: Some(shutdown_sender),
             shutdown_receiver: Some(shutdown_receiver),

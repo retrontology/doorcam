@@ -6,7 +6,7 @@ use crate::{
     ring_buffer::RingBuffer,
 };
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 /// Integration layer for video capture system
 pub struct VideoCaptureIntegration {

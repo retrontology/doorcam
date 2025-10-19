@@ -15,7 +15,7 @@ pub struct TouchInputHandler {
     device_path: String,
     event_bus: Arc<EventBus>,
     recovery: Arc<tokio::sync::Mutex<TouchRecovery>>,
-    retry_count: u32,
+    _retry_count: u32,
     max_retries: u32,
     retry_delay: Duration,
 }
@@ -27,7 +27,7 @@ impl TouchInputHandler {
             device_path: config.touch_device.clone(),
             event_bus,
             recovery: Arc::new(tokio::sync::Mutex::new(TouchRecovery::new())),
-            retry_count: 0,
+            _retry_count: 0,
             max_retries: 10,
             retry_delay: Duration::from_secs(5),
         }
@@ -277,6 +277,7 @@ impl TouchInputHandler {
 
     /// Fallback implementation when evdev feature is not available
     #[cfg(not(feature = "display"))]
+    #[allow(dead_code)]
     fn is_touch_event(_event: &()) -> bool {
         false
     }
@@ -773,6 +774,7 @@ impl AdvancedTouchInputHandler {
 
     /// Fallback implementation when evdev feature is not available
     #[cfg(not(feature = "display"))]
+    #[allow(dead_code)]
     fn parse_advanced_touch_event(
         _event: &(), 
         _current_position: &std::sync::Arc<std::sync::RwLock<(Option<i32>, Option<i32>)>>

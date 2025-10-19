@@ -1,7 +1,7 @@
 use crate::{
     config::{CaptureConfig, SystemConfig},
     error::{DoorcamError, Result},
-    events::{DoorcamEvent, EventBus},
+    events::EventBus,
     storage::{EventStorage, StorageStats, CleanupResult},
 };
 use std::sync::Arc;
@@ -153,7 +153,7 @@ impl EventStorageIntegration {
     /// Update monitoring statistics
     async fn update_monitoring_stats(
         storage: &Arc<EventStorage>,
-        stats: &Arc<RwLock<StorageIntegrationStats>>
+        _stats: &Arc<RwLock<StorageIntegrationStats>>
     ) -> Result<()> {
         let storage_stats = storage.get_storage_stats().await;
         

@@ -124,7 +124,7 @@ impl MotionAnalyzerIntegration {
         
         // Start the event handler task for system events
         let event_receiver = self.event_bus.subscribe();
-        let analyzer_for_events = Arc::clone(&self.analyzer);
+        let _analyzer_for_events = Arc::clone(&self.analyzer);
         let is_running_for_events = Arc::clone(&self.is_running);
         
         let event_handler_task = tokio::spawn(async move {

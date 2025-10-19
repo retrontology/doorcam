@@ -1,8 +1,11 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use config::{Config, ConfigError, Environment, File};
 use std::path::Path;
 use tracing::{debug, info};
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DoorcamConfig {
     pub camera: CameraConfig,
@@ -13,6 +16,7 @@ pub struct DoorcamConfig {
     pub system: SystemConfig,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CameraConfig {
     /// Camera device index (e.g., 0 for /dev/video0)

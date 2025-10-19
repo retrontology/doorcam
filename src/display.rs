@@ -1,14 +1,14 @@
 use crate::config::DisplayConfig;
 use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
 use crate::frame::{FrameData, FrameFormat};
-use crate::error::{DisplayError, DoorcamError, Result};
+use crate::error::{DisplayError, Result};
 use std::fs::{File, OpenOptions};
 use std::io::{Write, Seek, SeekFrom};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use tokio::time::{interval, sleep};
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 /// Display controller for HyperPixel 4.0 framebuffer interface
@@ -484,8 +484,8 @@ impl DisplayConverter {
     /// Apply rotation to display data (placeholder for future implementation)
     pub fn apply_rotation(
         data: &[u8],
-        width: u32,
-        height: u32,
+        _width: u32,
+        _height: u32,
         rotation: crate::config::Rotation,
     ) -> Result<Vec<u8>> {
         // TODO: Implement actual rotation in later tasks

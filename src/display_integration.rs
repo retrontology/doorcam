@@ -2,13 +2,13 @@ use crate::config::DisplayConfig;
 use crate::display::DisplayController;
 use crate::touch::{TouchInputHandler, MockTouchInputHandler};
 use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
-use crate::frame::FrameData;
+
 use crate::ring_buffer::RingBuffer;
 use crate::error::{DoorcamError, Result};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::time::{interval, sleep};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 /// Integration component that manages display controller and touch input together
 pub struct DisplayIntegration {
