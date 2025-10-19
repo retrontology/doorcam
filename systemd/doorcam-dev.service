@@ -1,0 +1,56 @@
+# Development systemd service for doorcam
+# Less restrictive security settings for easier development and debugging
+
+[Unit]
+Description=Doorcam Rust - Door Camera System (Development)
+Documentation=https://github.com/your-org/doorcam-rust
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=%i
+Group=video
+
+# Development binary path - adjust as needed
+ExecStart=/home/%i/doorcam-rust/target/debug/doorcam --config /home/%i/doorcam-rust/doorcam.toml
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=2
+StartLimitInterval=30
+StartLimitBurst=5
+
+# Timeouts
+TimeoutStartSec=10
+TimeoutStopSec=10
+
+# Working directory
+WorkingDirectory=/home/%i/doorcam-rust
+
+# Relaxed security for development
+NoNewPrivileges=false
+PrivateTmp=false
+ProtectSystem=false
+ProtectHome=false
+
+# Device access
+DeviceAllow=/dev/video* rw
+DeviceAllow=/dev/fb* rw
+DeviceAllow=/dev/input* r
+DeviceAllow=/dev/dri* rw
+SupplementaryGroups=video input
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=doorcam-dev
+
+# Development environment
+Environment=RUST_LOG=debug
+Environment=RUST_BACKTRACE=full
+Environment=DOORCAM_CONFIG_PATH=/home/%i/doorcam-rust/doorcam.toml
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,47 @@
+[Unit]
+Description=Doorcam Rust - Door Camera System
+Documentation=https://github.com/your-org/doorcam-rust
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=doorcam
+Group=video
+ExecStart=/usr/local/bin/doorcam --config /etc/doorcam/doorcam.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/doorcam /var/log/doorcam
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Device access for camera and display
+DeviceAllow=/dev/video* rw
+DeviceAllow=/dev/fb* rw
+DeviceAllow=/dev/input* r
+DeviceAllow=/dev/dri* rw
+SupplementaryGroups=video input
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=doorcam
+
+# Environment
+Environment=RUST_LOG=info
+Environment=DOORCAM_CONFIG_PATH=/etc/doorcam/doorcam.toml
+
+[Install]
+WantedBy=multi-user.target
