@@ -15,6 +15,7 @@ toml = "0.8"
 # Async runtime and utilities
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = "0.7"
+async-trait = "0.1"
 
 # Logging and tracing
 tracing = "0.1"

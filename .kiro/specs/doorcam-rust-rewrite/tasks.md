@@ -63,14 +63,23 @@
     - Add error handling and reconnection logic
     - _Requirements: 7.3, 12.5_
 
-- [ ] 5. Create event system for component coordination
-  - [ ] 5.1 Implement async event bus
+- [x] 5. Create event system for component coordination
+
+
+
+
+
+  - [x] 5.1 Implement async event bus
+
+
     - Create DoorcamEvent enum with all event types
     - Implement EventBus with broadcast channels
     - Add event publishing and subscription methods
     - _Requirements: 1.1, 1.5_
 
-  - [ ] 5.2 Define event handling patterns
+  - [x] 5.2 Define event handling patterns
+
+
     - Create event receiver patterns for components
     - Implement event filtering and routing
     - Add event logging and debugging support
