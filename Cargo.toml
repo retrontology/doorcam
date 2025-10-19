@@ -58,13 +58,13 @@ tempfile = "3.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 # Video and image processing (Linux only)
 v4l = { version = "0.14", optional = true }
-opencv = { version = "0.92", optional = true }
+opencv = { version = "0.92", optional = true, features = ["clang-runtime"]  }
 
 # Input device handling (Linux only)
 evdev = { version = "0.12", optional = true }
 
 [features]
-default = []
+default = ["camera", "motion_analysis", "streaming", "display"]
 camera = ["dep:v4l"]
 motion_analysis = ["dep:opencv"]
 streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
