@@ -16,6 +16,7 @@ pub mod capture;
 pub mod capture_integration;
 pub mod storage;
 pub mod storage_integration;
+pub mod app_orchestration;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -27,6 +28,7 @@ pub use config::DoorcamConfig;
 pub use error::{DoorcamError, Result};
 pub use recovery::{RecoveryManager, RecoveryAction, RecoveryConfig, CameraRecovery, TouchRecovery, HealthMonitor, ComponentHealth, GracefulDegradation};
 pub use health::{SystemHealthManager, HealthChecker, HealthCheckResult, SystemMetrics};
+pub use app_orchestration::{DoorcamOrchestrator, ComponentState, ShutdownReason};
 pub use events::{
     DoorcamEvent, EventBus, EventFilter, EventReceiver,
     EventRouter, EventRoute, EventHandler, EventPipeline, EventProcessor,
