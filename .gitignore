@@ -72,7 +72,7 @@ instance/
 docs/_build/
 
 # PyBuilder
-target/
+# target/ - moved to Rust section
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -127,3 +127,44 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+*.rlib
+*.rmeta
+
+# Cargo
+# Cargo.lock - keep this for applications, ignore for libraries
+.cargo/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Application specific
+/captures/
+/test_captures/
+*.log
+*.pid
+
+# Configuration overrides
+doorcam.local.toml
+*.local.toml
+
+# Build artifacts
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
+# Runtime files
+/var/
+/tmp/
+*.sock
