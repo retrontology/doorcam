@@ -1,6 +1,7 @@
 use crate::config::DisplayConfig;
 use crate::events::{DoorcamEvent, EventBus};
-use crate::error::{DoorcamError, Result};
+use crate::error::{DoorcamError, Result, TouchError};
+use crate::recovery::{TouchRecovery, RecoveryAction};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::time::{sleep, Duration};
@@ -13,6 +14,7 @@ use evdev::{Device, EventType, InputEventKind, Key};
 pub struct TouchInputHandler {
     device_path: String,
     event_bus: Arc<EventBus>,
+    recovery: Arc<tokio::sync::Mutex<TouchRecovery>>,
     retry_count: u32,
     max_retries: u32,
     retry_delay: Duration,
@@ -24,6 +26,7 @@ impl TouchInputHandler {
         Self {
             device_path: config.touch_device.clone(),
             event_bus,
+            recovery: Arc::new(tokio::sync::Mutex::new(TouchRecovery::new())),
             retry_count: 0,
             max_retries: 10,
             retry_delay: Duration::from_secs(5),
@@ -73,6 +76,57 @@ impl TouchInputHandler {
         });
 
         Ok(())
+    }
+    
+    /// Handle touch error with recovery logic
+    pub async fn handle_error_with_recovery(&self, error: TouchError) -> RecoveryAction {
+        let mut recovery = self.recovery.lock().await;
+        recovery.handle_touch_error(&error)
+    }
+    
+    /// Attempt to recover from touch device failure
+    pub async fn recover(&self) -> Result<()> {
+        info!("Attempting touch device recovery");
+        
+        let mut recovery = self.recovery.lock().await;
+        
+        recovery.recover_touch(|| async {
+            self.test_touch_device().await
+        }).await
+    }
+    
+    /// Test touch device connectivity (used for recovery)
+    async fn test_touch_device(&self) -> std::result::Result<(), TouchError> {
+        #[cfg(feature = "display")]
+        {
+            let device = Device::open(&self.device_path)
+                .map_err(|e| TouchError::DeviceOpen {
+                    device: self.device_path.clone(),
+                    details: e.to_string(),
+                })?;
+            
+            let supported_events = device.supported_events();
+            if !supported_events.contains(EventType::KEY) {
+                return Err(TouchError::Device(
+                    format!("Device {} does not support key events", self.device_path)
+                ));
+            }
+            
+            info!("Touch device {} test successful", self.device_path);
+            Ok(())
+        }
+        
+        #[cfg(not(feature = "display"))]
+        {
+            warn!("Touch device testing not available on this platform");
+            Err(TouchError::NotAvailable)
+        }
+    }
+    
+    /// Reset recovery state after successful operation
+    pub async fn reset_recovery(&self) {
+        let mut recovery = self.recovery.lock().await;
+        recovery.reset();
     }
 
     /// Monitor touch device for input events using evdev
@@ -380,59 +434,28 @@ impl MockTouchInputHandler {
     }
 }
 
-/// Touch input error types
-#[derive(Debug, thiserror::Error)]
-pub enum TouchError {
-    #[error("Device error: {0}")]
-    Device(String),
-    
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    
-    #[error("Parse error: {0}")]
-    Parse(String),
-    
-    #[error("Device not found: {0}")]
-    DeviceNotFound(String),
-    
-    #[error("Permission denied: {0}")]
-    PermissionDenied(String),
-    
-    #[error("Device disconnected: {0}")]
-    DeviceDisconnected(String),
-    
-    #[error("Unsupported device: {0}")]
-    UnsupportedDevice(String),
-    
-    #[cfg(feature = "display")]
-    #[error("evdev error: {0}")]
-    Evdev(#[from] evdev::Error),
-}
+
 
 impl TouchError {
     /// Check if this error is recoverable (should retry)
     pub fn is_recoverable(&self) -> bool {
         match self {
             TouchError::Device(_) => true,
-            TouchError::Io(_) => true,
-            TouchError::DeviceNotFound(_) => true,
-            TouchError::DeviceDisconnected(_) => true,
-            TouchError::PermissionDenied(_) => false, // Don't retry permission errors
-            TouchError::UnsupportedDevice(_) => false, // Don't retry unsupported devices
-            TouchError::Parse(_) => false, // Don't retry parse errors
-            #[cfg(feature = "display")]
-            TouchError::Evdev(_) => true,
+            TouchError::DeviceOpen { .. } => true,
+            TouchError::DeviceRead { .. } => true,
+            TouchError::EventParsing { .. } => false, // Don't retry parse errors
+            TouchError::NotAvailable => false, // Don't retry if not available
         }
     }
     
     /// Get a user-friendly error message
     pub fn user_message(&self) -> String {
         match self {
-            TouchError::DeviceNotFound(path) => format!("Touch device not found at {}", path),
-            TouchError::PermissionDenied(path) => format!("Permission denied accessing touch device {}. Try running with sudo or adding user to input group.", path),
-            TouchError::DeviceDisconnected(path) => format!("Touch device {} was disconnected", path),
-            TouchError::UnsupportedDevice(path) => format!("Touch device {} does not support required input events", path),
-            _ => self.to_string(),
+            TouchError::DeviceOpen { device, .. } => format!("Touch device not found at {}", device),
+            TouchError::DeviceRead { details } => format!("Touch device read error: {}", details),
+            TouchError::EventParsing { details } => format!("Touch event parsing failed: {}", details),
+            TouchError::NotAvailable => "Touch input not available on this system".to_string(),
+            TouchError::Device(msg) => format!("Touch device error: {}", msg),
         }
     }
 }

@@ -2,7 +2,7 @@ use crate::config::AnalyzerConfig;
 use crate::events::{DoorcamEvent, EventBus};
 use crate::frame::{FrameData, FrameFormat};
 use crate::ring_buffer::RingBuffer;
-use crate::error::{DoorcamError, Result};
+use crate::error::{AnalyzerError, DoorcamError, Result};
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -45,7 +45,9 @@ impl MotionAnalyzer {
                 500,    // history - number of frames to use for background model
                 16.0,   // var_threshold - threshold for pixel classification
                 false   // detect_shadows - whether to detect shadows
-            ).map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to create background subtractor: {}", e)))?;
+            ).map_err(|e| AnalyzerError::BackgroundSubtractor { 
+                details: format!("Failed to create background subtractor: {}", e) 
+            })?;
             
             info!("OpenCV background subtractor initialized successfully");
             
@@ -127,7 +129,9 @@ impl MotionAnalyzer {
             let gray_mat = if mat.channels() == 3 {
                 let mut gray = Mat::default();
                 imgproc::cvt_color(&mat, &mut gray, imgproc::COLOR_BGR2GRAY, 0)
-                    .map_err(|e| DoorcamError::MotionAnalysis(format!("Color conversion failed: {}", e)))?;
+                    .map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("Color conversion failed: {}", e) 
+                    })?;
                 gray
             } else {
                 mat
@@ -142,20 +146,26 @@ impl MotionAnalyzer {
                 0.0, 
                 0.0, 
                 core::BORDER_DEFAULT
-            ).map_err(|e| DoorcamError::MotionAnalysis(format!("Gaussian blur failed: {}", e)))?;
+            ).map_err(|e| AnalyzerError::FrameProcessing { 
+                details: format!("Gaussian blur failed: {}", e) 
+            })?;
             
             // Apply background subtraction
             if let Some(ref mut bg_sub) = self.background_subtractor {
                 let mut fg_mask = Mat::default();
                 bg_sub.apply(&blurred, &mut fg_mask, -1.0)
-                    .map_err(|e| DoorcamError::MotionAnalysis(format!("Background subtraction failed: {}", e)))?;
+                    .map_err(|e| AnalyzerError::MotionDetection { 
+                        details: format!("Background subtraction failed: {}", e) 
+                    })?;
                 
                 // Apply morphological operations to clean up the mask
                 let kernel = imgproc::get_structuring_element(
                     imgproc::MORPH_ELLIPSE,
                     Size::new(5, 5),
                     Point::new(-1, -1)
-                ).map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to create morphological kernel: {}", e)))?;
+                ).map_err(|e| AnalyzerError::FrameProcessing { 
+                    details: format!("Failed to create morphological kernel: {}", e) 
+                })?;
                 
                 let mut cleaned_mask = Mat::default();
                 imgproc::morphology_ex(
@@ -167,7 +177,9 @@ impl MotionAnalyzer {
                     1,
                     core::BORDER_CONSTANT,
                     Scalar::default()
-                ).map_err(|e| DoorcamError::MotionAnalysis(format!("Morphological operation failed: {}", e)))?;
+                ).map_err(|e| AnalyzerError::FrameProcessing { 
+                    details: format!("Morphological operation failed: {}", e) 
+                })?;
                 
                 // Find contours
                 let mut contours = Vector::<Vector<Point>>::new();
@@ -177,15 +189,21 @@ impl MotionAnalyzer {
                     imgproc::RETR_EXTERNAL,
                     imgproc::CHAIN_APPROX_SIMPLE,
                     Point::new(0, 0)
-                ).map_err(|e| DoorcamError::MotionAnalysis(format!("Contour detection failed: {}", e)))?;
+                ).map_err(|e| AnalyzerError::MotionDetection { 
+                    details: format!("Contour detection failed: {}", e) 
+                })?;
                 
                 // Find the largest contour area
                 let mut max_area = 0.0;
                 for i in 0..contours.len() {
                     let contour = contours.get(i)
-                        .map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to get contour {}: {}", i, e)))?;
+                        .map_err(|e| AnalyzerError::MotionDetection { 
+                            details: format!("Failed to get contour {}: {}", i, e) 
+                        })?;
                     let area = imgproc::contour_area(&contour, false)
-                        .map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to calculate contour area: {}", e)))?;
+                        .map_err(|e| AnalyzerError::MotionDetection { 
+                            details: format!("Failed to calculate contour area: {}", e) 
+                        })?;
                     
                     if area > max_area {
                         max_area = area;
@@ -226,7 +244,9 @@ impl MotionAnalyzer {
                 // Decode MJPEG data
                 let data_vector = Vector::from_slice(&frame.data);
                 let decoded = imgcodecs::imdecode(&data_vector, imgcodecs::IMREAD_COLOR)
-                    .map_err(|e| DoorcamError::MotionAnalysis(format!("MJPEG decode failed: {}", e)))?;
+                    .map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("MJPEG decode failed: {}", e) 
+                    })?;
                 Ok(decoded)
             }
             FrameFormat::Yuyv => {
@@ -238,12 +258,16 @@ impl MotionAnalyzer {
                         core::CV_8UC2,
                         frame.data.as_ptr() as *mut std::ffi::c_void,
                         core::Mat_AUTO_STEP
-                    ).map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to create YUYV Mat: {}", e)))?
+                    ).map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("Failed to create YUYV Mat: {}", e) 
+                    })?
                 };
                 
                 let mut bgr_mat = Mat::default();
                 imgproc::cvt_color(&yuyv_mat, &mut bgr_mat, imgproc::COLOR_YUV2BGR_YUYV, 0)
-                    .map_err(|e| DoorcamError::MotionAnalysis(format!("YUYV to BGR conversion failed: {}", e)))?;
+                    .map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("YUYV to BGR conversion failed: {}", e) 
+                    })?;
                 Ok(bgr_mat)
             }
             FrameFormat::Rgb24 => {
@@ -255,12 +279,16 @@ impl MotionAnalyzer {
                         core::CV_8UC3,
                         frame.data.as_ptr() as *mut std::ffi::c_void,
                         core::Mat_AUTO_STEP
-                    ).map_err(|e| DoorcamError::MotionAnalysis(format!("Failed to create RGB Mat: {}", e)))?
+                    ).map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("Failed to create RGB Mat: {}", e) 
+                    })?
                 };
                 
                 let mut bgr_mat = Mat::default();
                 imgproc::cvt_color(&rgb_mat, &mut bgr_mat, imgproc::COLOR_RGB2BGR, 0)
-                    .map_err(|e| DoorcamError::MotionAnalysis(format!("RGB to BGR conversion failed: {}", e)))?;
+                    .map_err(|e| AnalyzerError::FrameProcessing { 
+                        details: format!("RGB to BGR conversion failed: {}", e) 
+                    })?;
                 Ok(bgr_mat)
             }
         }
@@ -358,7 +386,7 @@ mod tests {
             Ok(_) => {
                 // Motion detection succeeded
             }
-            Err(DoorcamError::MotionAnalysis(_)) => {
+            Err(DoorcamError::Analyzer(_)) => {
                 // Expected error with synthetic data
             }
             Err(e) => {

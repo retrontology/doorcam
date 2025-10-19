@@ -1,7 +1,7 @@
 use crate::config::DisplayConfig;
 use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
 use crate::frame::{FrameData, FrameFormat};
-use crate::error::{DoorcamError, Result};
+use crate::error::{DisplayError, DoorcamError, Result};
 use std::fs::{File, OpenOptions};
 use std::io::{Write, Seek, SeekFrom};
 use std::sync::Arc;
@@ -73,25 +73,25 @@ impl DisplayController {
 
     /// Open framebuffer device for writing
     async fn open_framebuffer(&self) -> Result<File> {
-        OpenOptions::new()
+        Ok(OpenOptions::new()
             .write(true)
             .open(&self.config.framebuffer_device)
-            .map_err(|e| DoorcamError::component(
-                "display".to_string(),
-                format!("Failed to open framebuffer {}: {}", self.config.framebuffer_device, e)
-            ))
+            .map_err(|e| DisplayError::FramebufferOpen {
+                device: self.config.framebuffer_device.clone(),
+                source: e,
+            })?)
     }
 
     /// Open backlight device for writing
     async fn open_backlight(&self) -> Result<File> {
-        OpenOptions::new()
+        Ok(OpenOptions::new()
             .write(true)
             .truncate(true)
             .open(&self.config.backlight_device)
-            .map_err(|e| DoorcamError::component(
-                "display".to_string(), 
-                format!("Failed to open backlight {}: {}", self.config.backlight_device, e)
-            ))
+            .map_err(|e| DisplayError::BacklightOpen {
+                device: self.config.backlight_device.clone(),
+                source: e,
+            })?)
     }
 
     /// Start the display controller with event handling
@@ -248,13 +248,19 @@ impl DisplayController {
             
             // Seek to beginning and write brightness value
             bl_file.seek(SeekFrom::Start(0))
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to seek backlight: {}", e)))?;
+                .map_err(|e| DisplayError::Backlight { 
+                    details: format!("Failed to seek backlight: {}", e) 
+                })?;
             
             bl_file.write_all(brightness_value.as_bytes())
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to write backlight: {}", e)))?;
+                .map_err(|e| DisplayError::Backlight { 
+                    details: format!("Failed to write backlight: {}", e) 
+                })?;
             
             bl_file.flush()
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to flush backlight: {}", e)))?;
+                .map_err(|e| DisplayError::Backlight { 
+                    details: format!("Failed to flush backlight: {}", e) 
+                })?;
             
             debug!("Backlight set to: {}", if enabled { "ON" } else { "OFF" });
         } else {
@@ -270,13 +276,19 @@ impl DisplayController {
                         let brightness_value = if enabled { "255" } else { "0" };
                         
                         bl_file.seek(SeekFrom::Start(0))
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to seek backlight: {}", e)))?;
+                            .map_err(|e| DisplayError::Backlight { 
+                                details: format!("Failed to seek backlight: {}", e) 
+                            })?;
                         
                         bl_file.write_all(brightness_value.as_bytes())
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to write backlight: {}", e)))?;
+                            .map_err(|e| DisplayError::Backlight { 
+                                details: format!("Failed to write backlight: {}", e) 
+                            })?;
                         
                         bl_file.flush()
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to flush backlight: {}", e)))?;
+                            .map_err(|e| DisplayError::Backlight { 
+                                details: format!("Failed to flush backlight: {}", e) 
+                            })?;
                         
                         debug!("Backlight set to: {}", if enabled { "ON" } else { "OFF" });
                     }
@@ -305,13 +317,19 @@ impl DisplayController {
             
             // Write to framebuffer
             fb_file.seek(SeekFrom::Start(0))
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to seek framebuffer: {}", e)))?;
+                .map_err(|e| DisplayError::Framebuffer { 
+                    details: format!("Failed to seek framebuffer: {}", e) 
+                })?;
             
             fb_file.write_all(&display_data)
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to write framebuffer: {}", e)))?;
+                .map_err(|e| DisplayError::Framebuffer { 
+                    details: format!("Failed to write framebuffer: {}", e) 
+                })?;
             
             fb_file.flush()
-                .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to flush framebuffer: {}", e)))?;
+                .map_err(|e| DisplayError::Framebuffer { 
+                    details: format!("Failed to flush framebuffer: {}", e) 
+                })?;
             
             debug!("Frame {} rendered to display", frame.id);
         } else {
@@ -327,13 +345,19 @@ impl DisplayController {
                         let display_data = self.convert_frame_for_display(frame).await?;
                         
                         fb_file.seek(SeekFrom::Start(0))
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to seek framebuffer: {}", e)))?;
+                            .map_err(|e| DisplayError::Framebuffer { 
+                                details: format!("Failed to seek framebuffer: {}", e) 
+                            })?;
                         
                         fb_file.write_all(&display_data)
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to write framebuffer: {}", e)))?;
+                            .map_err(|e| DisplayError::Framebuffer { 
+                                details: format!("Failed to write framebuffer: {}", e) 
+                            })?;
                         
                         fb_file.flush()
-                            .map_err(|e| DoorcamError::component("display".to_string(), format!("Failed to flush framebuffer: {}", e)))?;
+                            .map_err(|e| DisplayError::Framebuffer { 
+                                details: format!("Failed to flush framebuffer: {}", e) 
+                            })?;
                         
                         debug!("Frame {} rendered to display", frame.id);
                     }
@@ -425,21 +449,7 @@ impl Clone for DisplayController {
     }
 }
 
-/// Display error types
-#[derive(Debug, thiserror::Error)]
-pub enum DisplayError {
-    #[error("Framebuffer error: {0}")]
-    Framebuffer(String),
-    
-    #[error("Backlight error: {0}")]
-    Backlight(String),
-    
-    #[error("Format conversion error: {0}")]
-    FormatConversion(String),
-    
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-}
+
 
 /// Display format conversion utilities
 pub struct DisplayConverter;
@@ -449,10 +459,9 @@ impl DisplayConverter {
     pub fn rgb24_to_rgb565(rgb24_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         let expected_size = (width * height * 3) as usize;
         if rgb24_data.len() != expected_size {
-            return Err(DoorcamError::component(
-                "display".to_string(),
-                format!("Invalid RGB24 data size: expected {}, got {}", expected_size, rgb24_data.len())
-            ));
+            return Err(DisplayError::FormatConversion { 
+                details: format!("Invalid RGB24 data size: expected {}, got {}", expected_size, rgb24_data.len()) 
+            }.into());
         }
 
         let mut rgb565_data = Vec::with_capacity((width * height * 2) as usize);

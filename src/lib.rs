@@ -1,6 +1,8 @@
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod recovery;
+pub mod health;
 pub mod frame;
 pub mod ring_buffer;
 pub mod camera;
@@ -23,19 +25,21 @@ pub mod streaming_integration;
 
 pub use config::DoorcamConfig;
 pub use error::{DoorcamError, Result};
+pub use recovery::{RecoveryManager, RecoveryAction, RecoveryConfig, CameraRecovery, TouchRecovery, HealthMonitor, ComponentHealth, GracefulDegradation};
+pub use health::{SystemHealthManager, HealthChecker, HealthCheckResult, SystemMetrics};
 pub use events::{
-    DoorcamEvent, EventBus, EventBusError, EventFilter, EventReceiver,
+    DoorcamEvent, EventBus, EventFilter, EventReceiver,
     EventRouter, EventRoute, EventHandler, EventPipeline, EventProcessor,
     EventMetrics, EventDebugger
 };
 pub use frame::{FrameData, FrameFormat, ProcessedFrame, Rotation};
 pub use ring_buffer::{RingBuffer, RingBufferBuilder};
-pub use camera::{CameraInterface, CameraInterfaceBuilder, CameraError};
-pub use integration::{CameraRingBufferIntegration, CameraRingBufferIntegrationBuilder, IntegrationStatus, HealthCheckResult, HealthStatus};
+pub use camera::{CameraInterface, CameraInterfaceBuilder};
+pub use integration::{CameraRingBufferIntegration, CameraRingBufferIntegrationBuilder, IntegrationStatus, HealthStatus};
 pub use analyzer::MotionAnalyzer;
 pub use analyzer_integration::{MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder, MotionAnalysisMetrics};
-pub use display::{DisplayController, DisplayConverter, DisplayError};
-pub use touch::{TouchInputHandler, MockTouchInputHandler, AdvancedTouchInputHandler, TouchEvent, TouchEventType, TouchError};
+pub use display::{DisplayController, DisplayConverter};
+pub use touch::{TouchInputHandler, MockTouchInputHandler, AdvancedTouchInputHandler, TouchEvent, TouchEventType};
 pub use display_integration::{DisplayIntegration, DisplayIntegrationBuilder, DisplayIntegrationWithStats, DisplayStats};
 pub use capture::{VideoCapture, CaptureStats, CaptureMetadata};
 pub use capture_integration::{VideoCaptureIntegration, VideoCaptureIntegrationBuilder};

@@ -1,6 +1,6 @@
 use crate::{
     config::CaptureConfig,
-    error::{DoorcamError, Result},
+    error::{CaptureError, DoorcamError, Result},
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, FrameFormat, ProcessedFrame, Rotation},
     ring_buffer::RingBuffer,
@@ -57,7 +57,10 @@ impl VideoCapture {
         let capture_path = PathBuf::from(&self.config.path);
         if !capture_path.exists() {
             std::fs::create_dir_all(&capture_path)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
+                .map_err(|e| CaptureError::DirectoryCreation { 
+                    path: capture_path.display().to_string(), 
+                    source: e 
+                })?;
             info!("Created capture directory: {}", capture_path.display());
         }
 

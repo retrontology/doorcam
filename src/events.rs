@@ -1,3 +1,4 @@
+use crate::error::EventBusError;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use tokio::sync::broadcast;
@@ -183,7 +184,9 @@ impl EventBus {
         }
 
         self.sender.send(event)
-            .map_err(|e| EventBusError::PublishFailed(e.to_string()))
+            .map_err(|e| EventBusError::PublishFailed { 
+                details: e.to_string() 
+            })
     }
 
     /// Get the number of active subscribers
@@ -206,18 +209,7 @@ impl Clone for EventBus {
     }
 }
 
-/// Errors that can occur with the event bus
-#[derive(Debug, thiserror::Error)]
-pub enum EventBusError {
-    #[error("Failed to publish event: {0}")]
-    PublishFailed(String),
-    
-    #[error("No subscribers available")]
-    NoSubscribers,
-    
-    #[error("Receiver lagged behind: {0}")]
-    ReceiverLagged(u64),
-}
+
 
 /// Event filter for selective event handling
 #[derive(Debug, Clone)]
@@ -280,11 +272,13 @@ impl EventReceiver {
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!("Receiver '{}' lagged behind by {} events", self.name, n);
-                    return Err(EventBusError::ReceiverLagged(n));
+                    return Err(EventBusError::PublishFailed { 
+                        details: format!("Receiver lagged behind by {} events", n) 
+                    });
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     debug!("Event bus closed for receiver '{}'", self.name);
-                    return Err(EventBusError::PublishFailed("Event bus closed".to_string()));
+                    return Err(EventBusError::ChannelClosed);
                 }
             }
         }
@@ -306,11 +300,13 @@ impl EventReceiver {
                 }
                 Err(broadcast::error::TryRecvError::Lagged(n)) => {
                     warn!("Receiver '{}' lagged behind by {} events", self.name, n);
-                    return Err(EventBusError::ReceiverLagged(n));
+                    return Err(EventBusError::PublishFailed { 
+                        details: format!("Receiver lagged behind by {} events", n) 
+                    });
                 }
                 Err(broadcast::error::TryRecvError::Closed) => {
                     debug!("Event bus closed for receiver '{}'", self.name);
-                    return Err(EventBusError::PublishFailed("Event bus closed".to_string()));
+                    return Err(EventBusError::ChannelClosed);
                 }
             }
         }

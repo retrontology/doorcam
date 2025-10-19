@@ -1,6 +1,7 @@
 use crate::config::CameraConfig;
-use crate::error::{DoorcamError, Result};
+use crate::error::{CameraError, DoorcamError, Result};
 use crate::frame::{FrameData, FrameFormat};
+use crate::recovery::{CameraRecovery, RecoveryAction};
 use crate::ring_buffer::RingBuffer;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,38 +23,12 @@ pub struct CameraInterface {
     config: CameraConfig,
     frame_counter: AtomicU64,
     is_running: AtomicBool,
+    recovery: Arc<tokio::sync::Mutex<CameraRecovery>>,
     #[cfg(all(feature = "camera", target_os = "linux"))]
     device: Option<Arc<v4l::Device>>,
 }
 
-/// Camera-specific error types
-#[derive(thiserror::Error, Debug)]
-pub enum CameraError {
-    #[error("Failed to open camera device {device}")]
-    DeviceOpen { device: u32 },
-    
-    #[error("Unsupported format: {0}")]
-    UnsupportedFormat(String),
-    
-    #[error("Failed to configure camera: {0}")]
-    Configuration(String),
-    
-    #[error("Capture stream error: {0}")]
-    CaptureStream(String),
-    
-    #[error("Camera not available (feature disabled)")]
-    NotAvailable,
-    
-    #[cfg(all(feature = "camera", target_os = "linux"))]
-    #[error("V4L2 error: {0}")]
-    V4l2(#[from] v4l::Error),
-}
 
-impl From<CameraError> for DoorcamError {
-    fn from(err: CameraError) -> Self {
-        DoorcamError::component("camera", &err.to_string())
-    }
-}
 
 impl CameraInterface {
     /// Create a new camera interface with the given configuration
@@ -67,6 +42,7 @@ impl CameraInterface {
             config,
             frame_counter: AtomicU64::new(0),
             is_running: AtomicBool::new(false),
+            recovery: Arc::new(tokio::sync::Mutex::new(CameraRecovery::new())),
             #[cfg(all(feature = "camera", target_os = "linux"))]
             device: None,
         };
@@ -83,24 +59,31 @@ impl CameraInterface {
         debug!("Opening V4L2 device: {}", device_path);
         
         let device = v4l::Device::new(&device_path)
-            .map_err(|e| CameraError::DeviceOpen {
+            .map_err(|e| CameraError::DeviceOpenWithSource {
                 device: self.config.index,
+                details: e.to_string(),
             })?;
         
         // Configure video format
         let mut fmt = device.format()
-            .map_err(|e| CameraError::Configuration(format!("Failed to get format: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to get format: {}", e) 
+            })?;
         
         fmt.width = self.config.resolution.0;
         fmt.height = self.config.resolution.1;
         fmt.fourcc = self.parse_format(&self.config.format)?;
         
         device.set_format(&fmt)
-            .map_err(|e| CameraError::Configuration(format!("Failed to set format: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to set format: {}", e) 
+            })?;
         
         // Verify the format was set correctly
         let actual_fmt = device.format()
-            .map_err(|e| CameraError::Configuration(format!("Failed to verify format: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to verify format: {}", e) 
+            })?;
         
         if actual_fmt.width != self.config.resolution.0 || actual_fmt.height != self.config.resolution.1 {
             warn!(
@@ -112,16 +95,22 @@ impl CameraInterface {
         
         // Set frame rate
         let mut params = device.params()
-            .map_err(|e| CameraError::Configuration(format!("Failed to get params: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to get params: {}", e) 
+            })?;
         
         params.interval = v4l::Fraction::new(1, self.config.max_fps);
         
         device.set_params(&params)
-            .map_err(|e| CameraError::Configuration(format!("Failed to set frame rate: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to set frame rate: {}", e) 
+            })?;
         
         // Verify frame rate
         let actual_params = device.params()
-            .map_err(|e| CameraError::Configuration(format!("Failed to verify params: {}", e)))?;
+            .map_err(|e| CameraError::Configuration { 
+                details: format!("Failed to verify params: {}", e) 
+            })?;
         
         let actual_fps = actual_params.interval.denominator / actual_params.interval.numerator;
         if actual_fps != self.config.max_fps {
@@ -157,7 +146,9 @@ impl CameraInterface {
             "MJPG" | "MJPEG" => Ok(v4l::FourCC::new(b"MJPG")),
             "YUYV" => Ok(v4l::FourCC::new(b"YUYV")),
             "RGB24" => Ok(v4l::FourCC::new(b"RGB3")),
-            _ => Err(CameraError::UnsupportedFormat(format.to_string())),
+            _ => Err(CameraError::UnsupportedFormat { 
+                format: format.to_string() 
+            }),
         }
     }
     
@@ -190,7 +181,9 @@ impl CameraInterface {
             if let Some(device) = &self.device {
                 self.run_capture_loop(Arc::clone(device), ring_buffer).await?;
             } else {
-                return Err(CameraError::Configuration("Device not initialized".to_string()).into());
+                return Err(CameraError::Configuration { 
+                    details: "Device not initialized".to_string() 
+                }.into());
             }
         }
         
@@ -247,7 +240,9 @@ impl CameraInterface {
         frame_counter: &AtomicU64,
     ) -> Result<(), CameraError> {
         let mut stream = Stream::with_buffers(device, Type::VideoCapture, 4)
-            .map_err(|e| CameraError::CaptureStream(format!("Failed to create stream: {}", e)))?;
+            .map_err(|e| CameraError::CaptureStream { 
+                details: format!("Failed to create stream: {}", e) 
+            })?;
         
         let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
         let mut interval_timer = interval(frame_interval);
@@ -268,7 +263,9 @@ impl CameraInterface {
                     
                     // Determine frame format from device format
                     let device_fmt = device.format()
-                        .map_err(|e| CameraError::Configuration(format!("Failed to get format: {}", e)))?;
+                        .map_err(|e| CameraError::Configuration { 
+                            details: format!("Failed to get format: {}", e) 
+                        })?;
                     let frame_format = match device_fmt.fourcc.str() {
                         Ok("MJPG") => FrameFormat::Mjpeg,
                         Ok("YUYV") => FrameFormat::Yuyv,
@@ -299,7 +296,9 @@ impl CameraInterface {
                 }
                 Err(e) => {
                     error!("Frame capture error: {}", e);
-                    return Err(CameraError::CaptureStream(format!("Capture failed: {}", e)));
+                    return Err(CameraError::CaptureStream { 
+                        details: format!("Capture failed: {}", e) 
+                    });
                 }
             }
         }
@@ -453,6 +452,70 @@ impl CameraInterface {
         }
     }
     
+    /// Handle camera error with recovery logic
+    pub async fn handle_error_with_recovery(&self, error: CameraError) -> RecoveryAction {
+        let mut recovery = self.recovery.lock().await;
+        recovery.handle_camera_error(&error)
+    }
+    
+    /// Attempt to recover from camera failure
+    pub async fn recover(&self) -> Result<()> {
+        info!("Attempting camera recovery");
+        
+        let mut recovery = self.recovery.lock().await;
+        
+        recovery.recover_camera(|| async {
+            self.reinitialize_device().await
+        }).await
+    }
+    
+    /// Reinitialize camera device (used for recovery)
+    async fn reinitialize_device(&self) -> std::result::Result<(), CameraError> {
+        #[cfg(all(feature = "camera", target_os = "linux"))]
+        {
+            // This is a simplified version - in practice you'd need to handle
+            // the device field being in an Arc and potentially recreate it
+            info!("Reinitializing camera device {}", self.config.index);
+            
+            let device_path = format!("/dev/video{}", self.config.index);
+            let device = v4l::Device::new(&device_path)
+                .map_err(|e| CameraError::DeviceOpenWithSource {
+                    device: self.config.index,
+                    details: e.to_string(),
+                })?;
+            
+            // Configure the device (similar to initialize_device but simpler)
+            let mut fmt = device.format()
+                .map_err(|e| CameraError::Configuration { 
+                    details: format!("Failed to get format during recovery: {}", e) 
+                })?;
+            
+            fmt.width = self.config.resolution.0;
+            fmt.height = self.config.resolution.1;
+            fmt.fourcc = self.format_to_fourcc(&self.config.format)?;
+            
+            device.set_format(&fmt)
+                .map_err(|e| CameraError::Configuration { 
+                    details: format!("Failed to set format during recovery: {}", e) 
+                })?;
+            
+            info!("Camera device {} reinitialized successfully", self.config.index);
+            Ok(())
+        }
+        
+        #[cfg(not(all(feature = "camera", target_os = "linux")))]
+        {
+            warn!("Camera recovery not available on this platform");
+            Err(CameraError::NotAvailable)
+        }
+    }
+    
+    /// Reset recovery state after successful operation
+    pub async fn reset_recovery(&self) {
+        let mut recovery = self.recovery.lock().await;
+        recovery.reset();
+    }
+    
     /// Test camera connectivity and configuration
     pub async fn test_connection(&self) -> Result<()> {
         #[cfg(all(feature = "camera", target_os = "linux"))]
@@ -460,7 +523,9 @@ impl CameraInterface {
             if let Some(device) = &self.device {
                 // Try to get current format to test device access
                 let fmt = device.format()
-                    .map_err(|e| CameraError::Configuration(format!("Device test failed: {}", e)))?;
+                    .map_err(|e| CameraError::Configuration { 
+                        details: format!("Device test failed: {}", e) 
+                    })?;
                 
                 debug!(
                     "Camera test successful: {}x{} format {:?}",
@@ -469,7 +534,9 @@ impl CameraInterface {
                 
                 Ok(())
             } else {
-                Err(CameraError::Configuration("Device not initialized".to_string()).into())
+                Err(CameraError::Configuration { 
+                    details: "Device not initialized".to_string() 
+                }.into())
             }
         }
         

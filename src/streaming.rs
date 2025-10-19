@@ -3,7 +3,7 @@ use crate::{
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, FrameFormat},
     ring_buffer::RingBuffer,
-    error::{DoorcamError, Result},
+    error::{DoorcamError, Result, StreamError},
 };
 use axum::{
     extract::State,
@@ -63,7 +63,10 @@ impl StreamServer {
         
         let listener = tokio::net::TcpListener::bind(&addr)
             .await
-            .map_err(|e| DoorcamError::system(&format!("Failed to bind to {}: {}", addr, e)))?;
+            .map_err(|e| StreamError::BindFailed { 
+                address: addr.clone(), 
+                source: e 
+            })?;
 
         info!("MJPEG server listening on {}", addr);
 
@@ -75,7 +78,9 @@ impl StreamServer {
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| DoorcamError::system(&format!("Server error: {}", e)))?;
+            .map_err(|e| StreamError::StartupFailed { 
+                details: format!("Server error: {}", e) 
+            })?;
 
         Ok(())
     }
@@ -387,15 +392,21 @@ impl StreamServerBuilder {
     /// Build the stream server
     pub fn build(self) -> Result<StreamServer> {
         let config = self.config.ok_or_else(|| {
-            DoorcamError::system("Stream configuration is required")
+            StreamError::StartupFailed { 
+                details: "Stream configuration is required".to_string() 
+            }.into()
         })?;
 
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
-            DoorcamError::system("Ring buffer is required")
+            StreamError::StartupFailed { 
+                details: "Ring buffer is required".to_string() 
+            }.into()
         })?;
 
         let event_bus = self.event_bus.ok_or_else(|| {
-            DoorcamError::system("Event bus is required")
+            StreamError::StartupFailed { 
+                details: "Event bus is required".to_string() 
+            }.into()
         })?;
 
         Ok(StreamServer::new(config, ring_buffer, event_bus))
