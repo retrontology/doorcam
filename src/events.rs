@@ -837,7 +837,7 @@ mod pattern_tests {
 
     #[tokio::test]
     async fn test_forwarding_handler() {
-        let source_bus = Arc::new(EventBus::new(10));
+        let _source_bus = Arc::new(EventBus::new(10));
         let target_bus = Arc::new(EventBus::new(10));
         let mut target_receiver = target_bus.subscribe();
 

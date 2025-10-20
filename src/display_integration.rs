@@ -348,7 +348,7 @@ mod tests {
     use super::*;
     use crate::config::DisplayConfig;
     use crate::ring_buffer::RingBufferBuilder;
-    use std::time::SystemTime;
+
     use tokio::time::{timeout, Duration};
 
     fn create_test_config() -> DisplayConfig {

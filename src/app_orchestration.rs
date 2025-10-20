@@ -105,7 +105,7 @@ impl DoorcamOrchestrator {
         
         // Start streaming server if enabled
         #[cfg(feature = "streaming")]
-        if let Some(stream_server) = &self.stream_server {
+        if let Some(_stream_server) = &self.stream_server {
             self.set_component_state("streaming", ComponentState::Starting).await;
             
             let server = StreamServer::new(

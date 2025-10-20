@@ -1,10 +1,9 @@
 use crate::{
     config::StreamConfig,
     events::{DoorcamEvent, EventBus},
-    frame::FrameData,
     ring_buffer::RingBuffer,
     streaming::StreamServer,
-    error::{DoorcamError, Result},
+    error::Result,
 };
 use std::sync::Arc;
 use tokio::time::{interval, Duration, Instant};

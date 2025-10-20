@@ -94,11 +94,11 @@ pub enum CameraError {
 /// Motion analyzer error types
 #[derive(Error, Debug)]
 pub enum AnalyzerError {
-    #[error("OpenCV initialization failed: {details}")]
-    OpenCvInit { details: String },
+    #[error("Image processing initialization failed: {details}")]
+    ImageProcInit { details: String },
     
-    #[error("Background subtractor creation failed: {details}")]
-    BackgroundSubtractor { details: String },
+    #[error("Background model creation failed: {details}")]
+    BackgroundModel { details: String },
     
     #[error("Frame processing failed: {details}")]
     FrameProcessing { details: String },
@@ -106,12 +106,12 @@ pub enum AnalyzerError {
     #[error("Motion detection algorithm failed: {details}")]
     MotionDetection { details: String },
     
-    #[error("Feature not available (OpenCV disabled)")]
+    #[error("Feature not available (motion analysis disabled)")]
     NotAvailable,
     
     #[cfg(feature = "motion_analysis")]
-    #[error("OpenCV error: {0}")]
-    OpenCV(#[from] opencv::Error),
+    #[error("Image processing error: {0}")]
+    ImageError(#[from] image::ImageError),
 }
 
 /// Stream server error types
@@ -178,6 +178,15 @@ pub enum TouchError {
     
     #[error("Device error: {0}")]
     Device(String),
+    
+    #[error("Device not found: {0}")]
+    DeviceNotFound(String),
+    
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+    
+    #[error("Unsupported device: {0}")]
+    UnsupportedDevice(String),
 }
 
 /// Video capture error types
@@ -255,9 +264,7 @@ pub enum ProcessingError {
     #[error("Image processing library error: {details}")]
     ImageLibrary { details: String },
     
-    #[cfg(feature = "motion_analysis")]
-    #[error("OpenCV processing error: {0}")]
-    OpenCV(#[from] opencv::Error),
+
 }
 
 /// Ring buffer error types

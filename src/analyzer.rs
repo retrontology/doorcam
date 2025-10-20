@@ -1,19 +1,24 @@
 use crate::config::AnalyzerConfig;
 use crate::events::{DoorcamEvent, EventBus};
 use crate::frame::FrameData;
-
+#[cfg(feature = "motion_analysis")]
+use crate::frame::FrameFormat;
 use crate::error::Result;
+#[cfg(feature = "motion_analysis")]
+use crate::error::AnalyzerError;
 
 use std::time::SystemTime;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[cfg(feature = "motion_analysis")]
-use opencv::{
-    core::{self, Mat, Point, Scalar, Size, Vector},
-    imgcodecs,
-    imgproc::{self, BackgroundSubtractor},
-    prelude::*,
-    video,
+use image::{ImageBuffer, Luma, RgbImage, GrayImage};
+#[cfg(feature = "motion_analysis")]
+use imageproc::{
+    filter::gaussian_blur_f32,
+    morphology::{dilate, erode},
+    distance_transform::Norm,
+    contrast::threshold,
+    region_labelling::{connected_components, Connectivity},
 };
 
 /// Simple motion detection state for fallback implementation
@@ -23,11 +28,13 @@ struct SimpleMotionState {
     last_motion_time: Option<SystemTime>,
 }
 
-/// Motion detection analyzer using OpenCV background subtraction
+/// Motion detection analyzer using imageproc background subtraction
 pub struct MotionAnalyzer {
     config: AnalyzerConfig,
     #[cfg(feature = "motion_analysis")]
-    background_subtractor: Option<core::Ptr<dyn video::BackgroundSubtractor>>,
+    background_model: Option<GrayImage>,
+    #[cfg(feature = "motion_analysis")]
+    frame_count: u64,
     #[cfg(not(feature = "motion_analysis"))]
     simple_state: SimpleMotionState,
 }
@@ -39,19 +46,12 @@ impl MotionAnalyzer {
         
         #[cfg(feature = "motion_analysis")]
         {
-            let background_subtractor = video::create_background_subtractor_mog2(
-                500,    // history - number of frames to use for background model
-                16.0,   // var_threshold - threshold for pixel classification
-                false   // detect_shadows - whether to detect shadows
-            ).map_err(|e| AnalyzerError::BackgroundSubtractor { 
-                details: format!("Failed to create background subtractor: {}", e) 
-            })?;
-            
-            info!("OpenCV background subtractor initialized successfully");
+            info!("Imageproc motion analyzer initialized successfully");
             
             Ok(Self {
                 config,
-                background_subtractor: Some(background_subtractor),
+                background_model: None,
+                frame_count: 0,
             })
         }
         
@@ -68,25 +68,36 @@ impl MotionAnalyzer {
         }
     }
     
-    /// Analyze a single frame for motion
+    /// Analyze a single frame for motion (async wrapper)
     pub async fn analyze_frame(
         &mut self,
         frame: &FrameData,
         event_bus: &EventBus
     ) -> Result<Option<f64>> {
-        match self.detect_motion(frame).await {
+        let motion_result = self.analyze_frame_sync(frame)?;
+        
+        if let Some(motion_area) = motion_result {
+            // Publish motion detection event
+            if let Err(e) = event_bus.publish(DoorcamEvent::MotionDetected {
+                contour_area: motion_area,
+                timestamp: frame.timestamp,
+            }).await {
+                error!("Failed to publish motion detection event: {}", e);
+            }
+        }
+        
+        Ok(motion_result)
+    }
+    
+    /// Analyze a single frame for motion (synchronous)
+    pub fn analyze_frame_sync(
+        &mut self,
+        frame: &FrameData,
+    ) -> Result<Option<f64>> {
+        match self.detect_motion_sync(frame) {
             Ok(Some(motion_area)) => {
                 if motion_area > self.config.contour_minimum_area {
                     info!("Motion detected: area = {:.2} pixels", motion_area);
-                    
-                    // Publish motion detection event
-                    if let Err(e) = event_bus.publish(DoorcamEvent::MotionDetected {
-                        contour_area: motion_area,
-                        timestamp: frame.timestamp,
-                    }).await {
-                        error!("Failed to publish motion detection event: {}", e);
-                    }
-                    
                     Ok(Some(motion_area))
                 } else {
                     debug!("Motion area {:.2} below threshold {:.2}", motion_area, self.config.contour_minimum_area);
@@ -99,121 +110,57 @@ impl MotionAnalyzer {
             }
             Err(e) => {
                 error!("Motion detection error for frame {}: {}", frame.id, e);
-                
-                // Publish system error event
-                if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
-                    component: "motion_analyzer".to_string(),
-                    error: e.to_string(),
-                }).await {
-                    error!("Failed to publish system error event: {}", publish_err);
-                }
-                
                 Err(e)
             }
         }
     }
     
     /// Detect motion in a single frame
-    async fn detect_motion(&mut self, _frame: &FrameData) -> Result<Option<f64>> {
+    fn detect_motion_sync(&mut self, frame: &FrameData) -> Result<Option<f64>> {
         #[cfg(feature = "motion_analysis")]
         {
             debug!("Analyzing frame {} for motion ({}x{}, {:?})", 
                    frame.id, frame.width, frame.height, frame.format);
             
-            // Convert frame data to OpenCV Mat
-            let mat = self.frame_to_mat(frame)?;
-            
-            // Convert to grayscale if needed
-            let gray_mat = if mat.channels() == 3 {
-                let mut gray = Mat::default();
-                imgproc::cvt_color(&mat, &mut gray, imgproc::COLOR_BGR2GRAY, 0)
-                    .map_err(|e| AnalyzerError::FrameProcessing { 
-                        details: format!("Color conversion failed: {}", e) 
-                    })?;
-                gray
-            } else {
-                mat
-            };
+            // Convert frame data to grayscale image
+            let gray_image = self.frame_to_gray_image(frame)?;
             
             // Apply Gaussian blur to reduce noise
-            let mut blurred = Mat::default();
-            imgproc::gaussian_blur(
-                &gray_mat, 
-                &mut blurred, 
-                Size::new(21, 21), 
-                0.0, 
-                0.0, 
-                core::BORDER_DEFAULT
-            ).map_err(|e| AnalyzerError::FrameProcessing { 
-                details: format!("Gaussian blur failed: {}", e) 
-            })?;
+            let blurred = gaussian_blur_f32(&gray_image, 2.0);
             
-            // Apply background subtraction
-            if let Some(ref mut bg_sub) = self.background_subtractor {
-                let mut fg_mask = Mat::default();
-                bg_sub.apply(&blurred, &mut fg_mask, -1.0)
-                    .map_err(|e| AnalyzerError::MotionDetection { 
-                        details: format!("Background subtraction failed: {}", e) 
-                    })?;
-                
-                // Apply morphological operations to clean up the mask
-                let kernel = imgproc::get_structuring_element(
-                    imgproc::MORPH_ELLIPSE,
-                    Size::new(5, 5),
-                    Point::new(-1, -1)
-                ).map_err(|e| AnalyzerError::FrameProcessing { 
-                    details: format!("Failed to create morphological kernel: {}", e) 
-                })?;
-                
-                let mut cleaned_mask = Mat::default();
-                imgproc::morphology_ex(
-                    &fg_mask,
-                    &mut cleaned_mask,
-                    imgproc::MORPH_OPEN,
-                    &kernel,
-                    Point::new(-1, -1),
-                    1,
-                    core::BORDER_CONSTANT,
-                    Scalar::default()
-                ).map_err(|e| AnalyzerError::FrameProcessing { 
-                    details: format!("Morphological operation failed: {}", e) 
-                })?;
-                
-                // Find contours
-                let mut contours = Vector::<Vector<Point>>::new();
-                imgproc::find_contours(
-                    &cleaned_mask,
-                    &mut contours,
-                    imgproc::RETR_EXTERNAL,
-                    imgproc::CHAIN_APPROX_SIMPLE,
-                    Point::new(0, 0)
-                ).map_err(|e| AnalyzerError::MotionDetection { 
-                    details: format!("Contour detection failed: {}", e) 
-                })?;
-                
-                // Find the largest contour area
-                let mut max_area = 0.0;
-                for i in 0..contours.len() {
-                    let contour = contours.get(i)
-                        .map_err(|e| AnalyzerError::MotionDetection { 
-                            details: format!("Failed to get contour {}: {}", i, e) 
-                        })?;
-                    let area = imgproc::contour_area(&contour, false)
-                        .map_err(|e| AnalyzerError::MotionDetection { 
-                            details: format!("Failed to calculate contour area: {}", e) 
-                        })?;
-                    
-                    if area > max_area {
-                        max_area = area;
-                    }
-                }
-                
-                debug!("Motion analysis complete: max contour area = {:.2}", max_area);
-                return Ok(if max_area > 0.0 { Some(max_area) } else { None });
+            // Initialize background model if this is the first frame
+            if self.background_model.is_none() {
+                info!("Initializing background model with first frame");
+                self.background_model = Some(blurred.clone());
+                self.frame_count = 1;
+                return Ok(None); // No motion on first frame
             }
             
-            warn!("Background subtractor not initialized");
-            Ok(None)
+            let background = self.background_model.as_ref().unwrap();
+            
+            // Calculate frame difference
+            let diff_image = self.calculate_frame_difference(background, &blurred)?;
+            
+            // Apply threshold to create binary mask
+            let threshold_value = self.config.delta_threshold as u8;
+            let binary_mask = threshold(&diff_image, threshold_value);
+            
+            // Apply morphological operations to clean up noise
+            let kernel_size = 3u8;
+            let cleaned_mask = dilate(&erode(&binary_mask, Norm::LInf, kernel_size), Norm::LInf, kernel_size);
+            
+            // Find connected components (contours)
+            let components = connected_components(&cleaned_mask, Connectivity::Eight, Luma([0u8]));
+            
+            // Calculate the largest component area
+            let max_area = self.calculate_largest_component_area(&components);
+            
+            // Update background model (simple running average)
+            self.update_background_model(&blurred);
+            self.frame_count += 1;
+            
+            debug!("Motion analysis complete: max component area = {:.2}", max_area);
+            Ok(if max_area > 0.0 { Some(max_area) } else { None })
         }
         
         #[cfg(not(feature = "motion_analysis"))]
@@ -234,60 +181,121 @@ impl MotionAnalyzer {
         }
     }
     
-    /// Convert frame data to OpenCV Mat
+    /// Convert frame data to grayscale image
     #[cfg(feature = "motion_analysis")]
-    fn frame_to_mat(&self, frame: &FrameData) -> Result<Mat> {
+    fn frame_to_gray_image(&self, frame: &FrameData) -> Result<GrayImage> {
         match frame.format {
             FrameFormat::Mjpeg => {
                 // Decode MJPEG data
-                let data_vector = Vector::from_slice(&frame.data);
-                let decoded = imgcodecs::imdecode(&data_vector, imgcodecs::IMREAD_COLOR)
+                let dynamic_image = image::load_from_memory(&frame.data)
                     .map_err(|e| AnalyzerError::FrameProcessing { 
                         details: format!("MJPEG decode failed: {}", e) 
                     })?;
-                Ok(decoded)
+                Ok(dynamic_image.to_luma8())
             }
             FrameFormat::Yuyv => {
-                // Convert YUYV to BGR
-                let yuyv_mat = unsafe {
-                    Mat::new_rows_cols_with_data(
-                        frame.height as i32,
-                        frame.width as i32,
-                        core::CV_8UC2,
-                        frame.data.as_ptr() as *mut std::ffi::c_void,
-                        core::Mat_AUTO_STEP
-                    ).map_err(|e| AnalyzerError::FrameProcessing { 
-                        details: format!("Failed to create YUYV Mat: {}", e) 
-                    })?
-                };
-                
-                let mut bgr_mat = Mat::default();
-                imgproc::cvt_color(&yuyv_mat, &mut bgr_mat, imgproc::COLOR_YUV2BGR_YUYV, 0)
-                    .map_err(|e| AnalyzerError::FrameProcessing { 
-                        details: format!("YUYV to BGR conversion failed: {}", e) 
-                    })?;
-                Ok(bgr_mat)
+                // Convert YUYV to grayscale
+                self.yuyv_to_gray(frame)
             }
             FrameFormat::Rgb24 => {
-                // Convert RGB24 to BGR
-                let rgb_mat = unsafe {
-                    Mat::new_rows_cols_with_data(
-                        frame.height as i32,
-                        frame.width as i32,
-                        core::CV_8UC3,
-                        frame.data.as_ptr() as *mut std::ffi::c_void,
-                        core::Mat_AUTO_STEP
-                    ).map_err(|e| AnalyzerError::FrameProcessing { 
-                        details: format!("Failed to create RGB Mat: {}", e) 
-                    })?
-                };
-                
-                let mut bgr_mat = Mat::default();
-                imgproc::cvt_color(&rgb_mat, &mut bgr_mat, imgproc::COLOR_RGB2BGR, 0)
-                    .map_err(|e| AnalyzerError::FrameProcessing { 
-                        details: format!("RGB to BGR conversion failed: {}", e) 
-                    })?;
-                Ok(bgr_mat)
+                // Convert RGB24 to grayscale
+                self.rgb24_to_gray(frame)
+            }
+        }
+    }
+    
+    /// Convert YUYV frame to grayscale
+    #[cfg(feature = "motion_analysis")]
+    fn yuyv_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
+        let width = frame.width as u32;
+        let height = frame.height as u32;
+        let mut gray_image = GrayImage::new(width, height);
+        
+        // YUYV format: Y0 U Y1 V (4 bytes for 2 pixels)
+        for y in 0..height {
+            for x in 0..(width / 2) {
+                let base_idx = ((y * width / 2 + x) * 4) as usize;
+                if base_idx + 3 < frame.data.len() {
+                    let y0 = frame.data[base_idx];     // First pixel Y
+                    let y1 = frame.data[base_idx + 2]; // Second pixel Y
+                    
+                    gray_image.put_pixel(x * 2, y, Luma([y0]));
+                    if x * 2 + 1 < width {
+                        gray_image.put_pixel(x * 2 + 1, y, Luma([y1]));
+                    }
+                }
+            }
+        }
+        
+        Ok(gray_image)
+    }
+    
+    /// Convert RGB24 frame to grayscale
+    #[cfg(feature = "motion_analysis")]
+    fn rgb24_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
+        let width = frame.width as u32;
+        let height = frame.height as u32;
+        
+        // Create RGB image from raw data
+        let rgb_image = RgbImage::from_raw(width, height, frame.data.to_vec())
+            .ok_or_else(|| AnalyzerError::FrameProcessing {
+                details: "Failed to create RGB image from raw data".to_string()
+            })?;
+        
+        // Convert to grayscale using standard luminance formula
+        let mut gray_image = GrayImage::new(width, height);
+        for (x, y, rgb) in rgb_image.enumerate_pixels() {
+            let gray_value = (0.299 * rgb[0] as f32 + 0.587 * rgb[1] as f32 + 0.114 * rgb[2] as f32) as u8;
+            gray_image.put_pixel(x, y, Luma([gray_value]));
+        }
+        
+        Ok(gray_image)
+    }
+    
+    /// Calculate frame difference between background and current frame
+    #[cfg(feature = "motion_analysis")]
+    fn calculate_frame_difference(&self, background: &GrayImage, current: &GrayImage) -> Result<GrayImage> {
+        let (width, height) = background.dimensions();
+        let mut diff_image = GrayImage::new(width, height);
+        
+        for (x, y, bg_pixel) in background.enumerate_pixels() {
+            if let Some(curr_pixel) = current.get_pixel_checked(x, y) {
+                let diff = (bg_pixel[0] as i16 - curr_pixel[0] as i16).abs() as u8;
+                diff_image.put_pixel(x, y, Luma([diff]));
+            }
+        }
+        
+        Ok(diff_image)
+    }
+    
+    /// Calculate the area of the largest connected component
+    #[cfg(feature = "motion_analysis")]
+    fn calculate_largest_component_area(&self, components: &ImageBuffer<Luma<u32>, Vec<u32>>) -> f64 {
+        let mut component_counts = std::collections::HashMap::new();
+        
+        // Count pixels in each component (skip background component 0)
+        for pixel in components.pixels() {
+            let component_id = pixel[0];
+            if component_id > 0 {
+                *component_counts.entry(component_id).or_insert(0) += 1;
+            }
+        }
+        
+        // Return the size of the largest component
+        component_counts.values().max().copied().unwrap_or(0) as f64
+    }
+    
+    /// Update background model using simple running average
+    #[cfg(feature = "motion_analysis")]
+    fn update_background_model(&mut self, current_frame: &GrayImage) {
+        if let Some(ref mut background) = self.background_model {
+            let learning_rate = 0.05; // 5% learning rate
+            
+            for (bg_pixel, curr_pixel) in background.pixels_mut().zip(current_frame.pixels()) {
+                let bg_val = bg_pixel[0] as f32;
+                let curr_val = curr_pixel[0] as f32;
+                let new_val = (bg_val * (1.0 - learning_rate) + curr_val * learning_rate) as u8;
+                bg_pixel[0] = new_val;
             }
         }
     }
@@ -308,7 +316,7 @@ impl MotionAnalyzer {
 mod tests {
     use super::*;
     use crate::frame::FrameData;
-    use std::sync::Arc;
+
     
     #[tokio::test]
     async fn test_motion_analyzer_creation() {
@@ -377,14 +385,14 @@ mod tests {
         
         // This test may fail if OpenCV can't decode the synthetic JPEG
         // In a real implementation, we'd use actual camera frames
-        let result = analyzer.detect_motion(&frame).await;
+        let result = analyzer.detect_motion_sync(&frame);
         
         // We expect either a successful result or a specific error
         match result {
             Ok(_) => {
                 // Motion detection succeeded
             }
-            Err(DoorcamError::Analyzer(_)) => {
+            Err(crate::error::DoorcamError::Analyzer(_)) => {
                 // Expected error with synthetic data
             }
             Err(e) => {

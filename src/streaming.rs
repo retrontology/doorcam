@@ -451,7 +451,7 @@ mod tests {
         ring_buffer::RingBuffer,
     };
     use std::time::{Duration, SystemTime};
-    use tokio::time::timeout;
+
 
     fn create_test_frame(id: u64, format: FrameFormat) -> FrameData {
         let data = match format {
@@ -580,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn test_streaming_integration() {
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        let event_bus = Arc::new(EventBus::new(10));
+        let _event_bus = Arc::new(EventBus::new(10));
 
         // Add a test frame to the ring buffer
         let frame = create_test_frame(1, FrameFormat::Mjpeg);

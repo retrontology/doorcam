@@ -438,7 +438,7 @@ mod tests {
         ring_buffer::RingBuffer,
     };
     use std::time::Duration;
-    use tokio::time::timeout;
+
 
     fn create_test_config() -> CaptureConfig {
         CaptureConfig {

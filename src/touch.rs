@@ -223,11 +223,11 @@ impl TouchInputHandler {
         }
         
         // Log additional capabilities
-        if supported_events.contains(EventType::ABS) {
+        if supported_events.contains(EventType::ABSOLUTE) {
             debug!("Device {} supports absolute positioning", device_path);
         }
         
-        if supported_events.contains(EventType::REL) {
+        if supported_events.contains(EventType::RELATIVE) {
             debug!("Device {} supports relative positioning", device_path);
         }
         
@@ -342,8 +342,8 @@ impl TouchDeviceUtils {
             supports_touch: device.supported_keys()
                 .map(|keys| keys.contains(Key::BTN_TOUCH) || keys.contains(Key::BTN_LEFT))
                 .unwrap_or(false),
-            supports_absolute: device.supported_events().contains(EventType::ABS),
-            supports_relative: device.supported_events().contains(EventType::REL),
+            supports_absolute: device.supported_events().contains(EventType::ABSOLUTE),
+            supports_relative: device.supported_events().contains(EventType::RELATIVE),
         })
     }
     
@@ -446,6 +446,9 @@ impl TouchError {
             TouchError::DeviceRead { .. } => true,
             TouchError::EventParsing { .. } => false, // Don't retry parse errors
             TouchError::NotAvailable => false, // Don't retry if not available
+            TouchError::DeviceNotFound(_) => true,
+            TouchError::PermissionDenied(_) => false,
+            TouchError::UnsupportedDevice(_) => false,
         }
     }
     
@@ -457,6 +460,9 @@ impl TouchError {
             TouchError::EventParsing { details } => format!("Touch event parsing failed: {}", details),
             TouchError::NotAvailable => "Touch input not available on this system".to_string(),
             TouchError::Device(msg) => format!("Touch device error: {}", msg),
+            TouchError::DeviceNotFound(device) => format!("Touch device not found: {}", device),
+            TouchError::PermissionDenied(device) => format!("Permission denied for touch device: {}", device),
+            TouchError::UnsupportedDevice(device) => format!("Unsupported touch device: {}", device),
         }
     }
 }
@@ -845,7 +851,7 @@ mod tests {
     #[test]
     fn test_is_touch_event() {
         use evdev::{InputEvent, EventType, Key};
-        use std::time::{SystemTime, UNIX_EPOCH};
+
         
         // Create a mock touch press event
         let press_event = InputEvent::new(
@@ -926,7 +932,7 @@ mod tests {
         
         // Test coordinate update (should not generate touch event)
         let x_event = InputEvent::new(
-            EventType::ABS,
+            EventType::ABSOLUTE,
             AbsoluteAxisType::ABS_X.0,
             100,
         );

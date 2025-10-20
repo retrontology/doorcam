@@ -100,17 +100,25 @@ impl MotionAnalyzerIntegration {
                         
                         last_frame_id = frame.id;
                         
-                        // Analyze the frame
+                        // Analyze the frame - now fully async compatible with imageproc
                         let mut analyzer_guard = analyzer.write().await;
-                        if let Err(e) = analyzer_guard.analyze_frame(&frame, &event_bus).await {
-                            error!("Motion analysis error: {}", e);
-                            
-                            // Publish system error event
-                            if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
-                                component: "motion_analyzer_integration".to_string(),
-                                error: e.to_string(),
-                            }).await {
-                                error!("Failed to publish system error: {}", publish_err);
+                        match analyzer_guard.analyze_frame(&frame, &event_bus).await {
+                            Ok(Some(motion_area)) => {
+                                debug!("Motion detected with area: {:.2}", motion_area);
+                            }
+                            Ok(None) => {
+                                debug!("No motion detected in frame {}", frame.id);
+                            }
+                            Err(e) => {
+                                error!("Motion analysis error: {}", e);
+                                
+                                // Publish system error event
+                                if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
+                                    component: "motion_analyzer_integration".to_string(),
+                                    error: e.to_string(),
+                                }).await {
+                                    error!("Failed to publish motion analysis error event: {}", publish_err);
+                                }
                             }
                         }
                     } else {

@@ -1031,7 +1031,7 @@ mod tests {
         events::EventBus,
     };
     use tempfile::TempDir;
-    use tokio::fs;
+
     use chrono::Datelike;
 
     fn create_test_configs() -> (CaptureConfig, SystemConfig) {
