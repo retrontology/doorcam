@@ -152,19 +152,7 @@ impl CameraInterface {
         }
     }
     
-    /// Convert V4L2 FourCC to FrameFormat
-    #[cfg(all(feature = "camera", target_os = "linux"))]
-    fn fourcc_to_frame_format(&self, fourcc: v4l::FourCC) -> FrameFormat {
-        match fourcc.str() {
-            Ok("MJPG") => FrameFormat::Mjpeg,
-            Ok("YUYV") => FrameFormat::Yuyv,
-            Ok("RGB3") => FrameFormat::Rgb24,
-            _ => {
-                warn!("Unknown FourCC format: {:?}, defaulting to MJPEG", fourcc);
-                FrameFormat::Mjpeg
-            }
-        }
-    }
+
     
     /// Start camera capture and feed frames to the ring buffer
     pub async fn start_capture(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {

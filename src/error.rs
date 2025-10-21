@@ -388,3 +388,140 @@ impl ErrorSeverity {
 
 /// Convenience type alias for Results
 pub type Result<T> = std::result::Result<T, DoorcamError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_error_display_formatting() {
+        let camera_error = DoorcamError::Camera(CameraError::DeviceOpen { device: 0 });
+        assert_eq!(camera_error.to_string(), "Camera error: Failed to open camera device 0");
+
+        let analyzer_error = DoorcamError::Analyzer(AnalyzerError::FrameProcessing { 
+            details: "Test error".to_string() 
+        });
+        assert_eq!(analyzer_error.to_string(), "Motion analysis error: Frame processing failed: Test error");
+
+        let system_error = DoorcamError::system("Test system error");
+        assert_eq!(system_error.to_string(), "System error: Test system error");
+    }
+
+    #[test]
+    fn test_error_source_chains() {
+        use std::error::Error;
+        
+        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found");
+        let doorcam_error = DoorcamError::Io(io_error);
+        
+        assert!(doorcam_error.source().is_some());
+        assert_eq!(doorcam_error.source().unwrap().to_string(), "File not found");
+    }
+
+    #[test]
+    fn test_recoverable_error_classification() {
+        // Recoverable errors
+        assert!(DoorcamError::Camera(CameraError::Disconnected).is_recoverable());
+        assert!(DoorcamError::Camera(CameraError::DeviceOpen { device: 0 }).is_recoverable());
+        assert!(DoorcamError::Camera(CameraError::FrameTimeout { timeout: Duration::from_secs(1) }).is_recoverable());
+        assert!(DoorcamError::Touch(TouchError::DeviceOpen { 
+            device: "/dev/input/event0".to_string(), 
+            details: "Test".to_string() 
+        }).is_recoverable());
+        assert!(DoorcamError::Touch(TouchError::DeviceRead { details: "Test".to_string() }).is_recoverable());
+
+        // Non-recoverable errors
+        assert!(!DoorcamError::system("Critical error").is_recoverable());
+        assert!(!DoorcamError::Shutdown.is_recoverable());
+        assert!(!DoorcamError::recovery_failed("camera", 5).is_recoverable());
+        assert!(!DoorcamError::Touch(TouchError::PermissionDenied("Test".to_string())).is_recoverable());
+    }
+
+    #[test]
+    fn test_component_name_extraction() {
+        assert_eq!(DoorcamError::Camera(CameraError::Disconnected).component_name(), "camera");
+        assert_eq!(DoorcamError::Analyzer(AnalyzerError::NotAvailable).component_name(), "analyzer");
+        assert_eq!(DoorcamError::Touch(TouchError::NotAvailable).component_name(), "touch");
+        assert_eq!(DoorcamError::system("test").component_name(), "system");
+        assert_eq!(DoorcamError::component("custom", "test").component_name(), "custom");
+    }
+
+    #[test]
+    fn test_error_severity_levels() {
+        use ErrorSeverity::*;
+        
+        assert_eq!(DoorcamError::Shutdown.severity(), Info);
+        assert_eq!(DoorcamError::Camera(CameraError::NotAvailable).severity(), Warning);
+        assert_eq!(DoorcamError::recovery_failed("test", 3).severity(), Critical);
+        assert_eq!(DoorcamError::Camera(CameraError::Disconnected).severity(), Warning);
+        assert_eq!(DoorcamError::system("error").severity(), Error);
+    }
+
+    #[test]
+    fn test_error_severity_to_tracing_level() {
+        use ErrorSeverity::*;
+        
+        assert_eq!(Info.to_tracing_level(), tracing::Level::INFO);
+        assert_eq!(Warning.to_tracing_level(), tracing::Level::WARN);
+        assert_eq!(Error.to_tracing_level(), tracing::Level::ERROR);
+        assert_eq!(Critical.to_tracing_level(), tracing::Level::ERROR);
+    }
+
+    #[test]
+    fn test_camera_error_types() {
+        let device_error = CameraError::DeviceOpen { device: 1 };
+        assert_eq!(device_error.to_string(), "Failed to open camera device 1");
+
+        let config_error = CameraError::Configuration { details: "Invalid format".to_string() };
+        assert_eq!(config_error.to_string(), "Failed to configure camera: Invalid format");
+
+        let timeout_error = CameraError::FrameTimeout { timeout: Duration::from_millis(500) };
+        assert!(timeout_error.to_string().contains("Frame timeout"));
+    }
+
+
+
+    #[test]
+    fn test_analyzer_error_types() {
+        let processing_error = AnalyzerError::FrameProcessing { 
+            details: "Invalid frame format".to_string() 
+        };
+        assert_eq!(processing_error.to_string(), "Frame processing failed: Invalid frame format");
+
+        let motion_error = AnalyzerError::MotionDetection { 
+            details: "Algorithm failed".to_string() 
+        };
+        assert_eq!(motion_error.to_string(), "Motion detection algorithm failed: Algorithm failed");
+
+        let not_available_error = AnalyzerError::NotAvailable;
+        assert_eq!(not_available_error.to_string(), "Feature not available (motion analysis disabled)");
+    }
+
+    #[test]
+    fn test_error_builder_methods() {
+        let system_error = DoorcamError::system("Test message");
+        match system_error {
+            DoorcamError::System { message } => assert_eq!(message, "Test message"),
+            _ => panic!("Expected System error"),
+        }
+
+        let component_error = DoorcamError::component("test_component", "Test message");
+        match component_error {
+            DoorcamError::Component { component, message } => {
+                assert_eq!(component, "test_component");
+                assert_eq!(message, "Test message");
+            },
+            _ => panic!("Expected Component error"),
+        }
+
+        let recovery_error = DoorcamError::recovery_failed("camera", 3);
+        match recovery_error {
+            DoorcamError::RecoveryFailed { component, attempts } => {
+                assert_eq!(component, "camera");
+                assert_eq!(attempts, 3);
+            },
+            _ => panic!("Expected RecoveryFailed error"),
+        }
+    }
+}

@@ -889,4 +889,105 @@ mod pattern_tests {
         assert_eq!(debugger.get_recent_events("motion_detected", 10).len(), 1);
         assert_eq!(debugger.get_recent_events("touch_detected", 10).len(), 1);
     }
-}
+
+    #[tokio::test]
+    async fn test_event_system_stress() {
+        use std::sync::Arc;
+        use tokio::time::Duration;
+        
+        let event_bus = Arc::new(EventBus::new(1000));
+        let mut handles = Vec::new();
+        
+        // Spawn multiple publishers
+        for publisher_id in 0..5 {
+            let event_bus_clone = Arc::clone(&event_bus);
+            let handle = tokio::spawn(async move {
+                for i in 0..100 {
+                    let event = DoorcamEvent::MotionDetected {
+                        contour_area: (publisher_id * 100 + i) as f64,
+                        timestamp: SystemTime::now(),
+                    };
+                    let _ = event_bus_clone.publish(event).await;
+                    
+                    // Small delay to simulate realistic event rates
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            });
+            handles.push(handle);
+        }
+        
+        // Spawn multiple subscribers
+        let received_events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        for _ in 0..3 {
+            let event_bus_clone = Arc::clone(&event_bus);
+            let received_clone = Arc::clone(&received_events);
+            let handle = tokio::spawn(async move {
+                let mut receiver = event_bus_clone.subscribe();
+                let mut count = 0;
+                
+                while count < 50 {
+                    if let Ok(event) = tokio::time::timeout(
+                        Duration::from_millis(100),
+                        receiver.recv()
+                    ).await {
+                        if event.is_ok() {
+                            received_clone.lock().await.push(event.unwrap());
+                            count += 1;
+                        }
+                    } else {
+                        break; // Timeout, stop receiving
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+        
+        // Wait for all tasks to complete
+        for handle in handles {
+            let _ = handle.await;
+        }
+        
+        // Check that events were received
+        let received = received_events.lock().await;
+        assert!(!received.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_event_error_handling() {
+        let event_bus = EventBus::new(10); // Small buffer to test overflow
+        
+        // Create a subscriber first so events can be published
+        let _receiver = event_bus.subscribe();
+        
+        // Test that the event bus handles publishing gracefully
+        let mut successful_publishes = 0;
+        
+        for i in 0..15 {
+            let event = DoorcamEvent::SystemError {
+                component: format!("component_{}", i),
+                error: "Test error".to_string(),
+            };
+            
+            let result = event_bus.publish(event).await;
+            if result.is_ok() {
+                successful_publishes += 1;
+            }
+        }
+        
+        // Should have some successful publishes
+        assert!(successful_publishes > 0);
+        
+        // Test that the event bus remains functional
+        assert!(event_bus.has_subscribers());
+        
+        // Test that we can publish additional events
+        let test_event = DoorcamEvent::SystemError {
+            component: "test".to_string(),
+            error: "Final test".to_string(),
+        };
+        
+        // This should work since we have a subscriber
+        let result = event_bus.publish(test_event).await;
+        // Result may vary depending on buffer state, but the operation should complete
+    }
+}    

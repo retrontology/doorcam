@@ -595,4 +595,38 @@ mod tests {
         let stats = buffer.stats();
         assert_eq!(stats.frames_pushed, 100);
     }
-}
+
+    #[tokio::test]
+    async fn test_ring_buffer_stress() {
+        use std::sync::Arc;
+        
+        let buffer = Arc::new(RingBuffer::new(100, Duration::from_millis(10)));
+        let mut handles = Vec::new();
+        
+        // Spawn multiple producers
+        for producer_id in 0..5 {
+            let buffer_clone = Arc::clone(&buffer);
+            let handle = tokio::spawn(async move {
+                for i in 0..50 {
+                    let frame_id = (producer_id * 50 + i) as u64;
+                    let frame = create_test_frame(frame_id, SystemTime::now());
+                    buffer_clone.push_frame(frame).await;
+                    
+                    // Small delay to simulate realistic frame rates
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            });
+            handles.push(handle);
+        }
+        
+        // Wait for all tasks to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        
+        // Buffer should be in a consistent state
+        let stats = buffer.stats();
+        assert!(stats.frames_pushed >= 250); // 5 producers * 50 frames each
+        assert!(stats.utilization_percent <= 100);
+    }
+} 

@@ -12,7 +12,6 @@ use tracing::{debug, error, info, warn};
 /// Integration layer between streaming server and ring buffer
 /// Handles frame synchronization, rate limiting, and quality adaptation
 pub struct StreamingIntegration {
-    stream_server: StreamServer,
     ring_buffer: Arc<RingBuffer>,
     event_bus: Arc<EventBus>,
     config: StreamConfig,
@@ -72,14 +71,7 @@ impl StreamingIntegration {
         ring_buffer: Arc<RingBuffer>,
         event_bus: Arc<EventBus>,
     ) -> Result<Self> {
-        let stream_server = StreamServer::new(
-            config.clone(),
-            Arc::clone(&ring_buffer),
-            Arc::clone(&event_bus),
-        );
-
         Ok(Self {
-            stream_server,
             ring_buffer,
             event_bus,
             config,

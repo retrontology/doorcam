@@ -7,7 +7,6 @@ use crate::error::Result;
 #[cfg(feature = "motion_analysis")]
 use crate::error::AnalyzerError;
 
-use std::time::SystemTime;
 use tracing::{debug, error, info};
 
 #[cfg(feature = "motion_analysis")]
@@ -25,7 +24,7 @@ use imageproc::{
 #[cfg(not(feature = "motion_analysis"))]
 struct SimpleMotionState {
     frame_count: u64,
-    last_motion_time: Option<SystemTime>,
+    last_motion_time: Option<std::time::SystemTime>,
 }
 
 /// Motion detection analyzer using imageproc background subtraction
@@ -172,7 +171,7 @@ impl MotionAnalyzer {
             if self.simple_state.frame_count % 10 == 0 {
                 let simulated_area = 1500.0; // Above default threshold
                 debug!("Simulated motion detection: area = {:.2}", simulated_area);
-                self.simple_state.last_motion_time = Some(SystemTime::now());
+                self.simple_state.last_motion_time = Some(std::time::SystemTime::now());
                 Ok(Some(simulated_area))
             } else {
                 debug!("No simulated motion detected");
@@ -376,7 +375,7 @@ mod tests {
         
         let frame = FrameData::new(
             1,
-            SystemTime::now(),
+            std::time::SystemTime::now(),
             jpeg_data,
             640,
             480,

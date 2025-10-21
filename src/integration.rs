@@ -449,4 +449,4 @@ mod tests {
         assert!(restart_result.unwrap().is_ok());
         assert!(integration.camera().is_capturing());
     }
-}
+} 
