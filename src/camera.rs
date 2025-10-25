@@ -6,7 +6,7 @@ use crate::ring_buffer::RingBuffer;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::time::{interval, sleep};
+use tokio::time::{interval, sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
 
 #[cfg(all(feature = "camera", target_os = "linux"))]
@@ -22,10 +22,11 @@ use v4l::io::traits::CaptureStream;
 pub struct CameraInterface {
     config: CameraConfig,
     frame_counter: AtomicU64,
-    is_running: AtomicBool,
+    is_running: Arc<AtomicBool>,
     recovery: Arc<tokio::sync::Mutex<CameraRecovery>>,
     #[cfg(all(feature = "camera", target_os = "linux"))]
     device: Option<Arc<v4l::Device>>,
+    capture_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 
@@ -41,10 +42,11 @@ impl CameraInterface {
         let mut camera = Self {
             config,
             frame_counter: AtomicU64::new(0),
-            is_running: AtomicBool::new(false),
+            is_running: Arc::new(AtomicBool::new(false)),
             recovery: Arc::new(tokio::sync::Mutex::new(CameraRecovery::new())),
             #[cfg(all(feature = "camera", target_os = "linux"))]
             device: None,
+            capture_task: Arc::new(tokio::sync::Mutex::new(None)),
         };
         
         camera.initialize_device().await?;
@@ -187,20 +189,27 @@ impl CameraInterface {
     #[cfg(all(feature = "camera", target_os = "linux"))]
     async fn run_capture_loop(&self, device: Arc<v4l::Device>, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let config = self.config.clone();
+        let is_running = Arc::clone(&self.is_running);
+        let capture_task = Arc::clone(&self.capture_task);
         
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let frame_counter = AtomicU64::new(0);
             let mut retry_count = 0;
             const MAX_RETRIES: u32 = 5;
             const RETRY_DELAY: Duration = Duration::from_secs(1);
             
-            loop {
-                match Self::capture_loop_inner(&device, &ring_buffer, &config, &frame_counter).await {
+            while is_running.load(Ordering::Relaxed) {
+                match Self::capture_loop_inner(&device, &ring_buffer, &config, &frame_counter, &is_running).await {
                     Ok(_) => {
                         info!("Camera capture loop ended normally");
                         break;
                     }
                     Err(e) => {
+                        if !is_running.load(Ordering::Relaxed) {
+                            info!("Camera capture stopping due to shutdown signal");
+                            break;
+                        }
+                        
                         error!("Camera capture error: {}", e);
                         retry_count += 1;
                         
@@ -214,7 +223,12 @@ impl CameraInterface {
                     }
                 }
             }
+            
+            info!("Camera capture loop terminated");
         });
+        
+        // Store the task handle for proper cleanup
+        *capture_task.lock().await = Some(task);
         
         Ok(())
     }
@@ -226,6 +240,7 @@ impl CameraInterface {
         ring_buffer: &Arc<RingBuffer>,
         config: &CameraConfig,
         frame_counter: &AtomicU64,
+        is_running: &Arc<AtomicBool>,
     ) -> Result<()> {
         let mut stream = Stream::with_buffers(device, Type::VideoCapture, 4)
             .map_err(|e| CameraError::CaptureStream { 
@@ -237,12 +252,13 @@ impl CameraInterface {
         
         info!("Camera capture loop started with {}ms frame interval", frame_interval.as_millis());
         
-        // Run for a reasonable number of frames in this implementation
-        let mut frame_count = 0;
-        const MAX_FRAMES: u64 = 10000;
-        
-        while frame_count < MAX_FRAMES {
+        while is_running.load(Ordering::Relaxed) {
             interval_timer.tick().await;
+            
+            // Check again after tick in case shutdown was requested during wait
+            if !is_running.load(Ordering::Relaxed) {
+                break;
+            }
             
             match stream.next() {
                 Ok((buffer, _meta)) => {
@@ -280,7 +296,6 @@ impl CameraInterface {
                     );
                     
                     ring_buffer.push_frame(frame_data).await;
-                    frame_count += 1;
                 }
                 Err(e) => {
                     error!("Frame capture error: {}", e);
@@ -299,20 +314,23 @@ impl CameraInterface {
     #[cfg(not(all(feature = "camera", target_os = "linux")))]
     async fn run_mock_capture_loop(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let config = self.config.clone();
+        let is_running = Arc::clone(&self.is_running);
+        let capture_task = Arc::clone(&self.capture_task);
         
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let frame_counter = AtomicU64::new(0);
             let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
             let mut interval_timer = interval(frame_interval);
             
             info!("Mock camera capture loop started");
             
-            // Run for a reasonable duration in mock mode
-            let mut frame_count = 0;
-            const MAX_MOCK_FRAMES: u64 = 1000;
-            
-            while frame_count < MAX_MOCK_FRAMES {
+            while is_running.load(Ordering::Relaxed) {
                 interval_timer.tick().await;
+                
+                // Check again after tick in case shutdown was requested during wait
+                if !is_running.load(Ordering::Relaxed) {
+                    break;
+                }
                 
                 let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
                 let timestamp = SystemTime::now();
@@ -342,12 +360,13 @@ impl CameraInterface {
                 
                 trace!("Generated mock frame {} ({}x{})", frame_id, width, height);
                 ring_buffer.push_frame(frame_data).await;
-                
-                frame_count += 1;
             }
             
-            info!("Mock camera capture loop stopped after {} frames", frame_count);
+            info!("Mock camera capture loop stopped");
         });
+        
+        // Store the task handle for proper cleanup
+        *capture_task.lock().await = Some(task);
         
         Ok(())
     }
@@ -362,8 +381,20 @@ impl CameraInterface {
         info!("Stopping camera capture");
         self.is_running.store(false, Ordering::Relaxed);
         
-        // Wait a bit for the capture loop to stop gracefully
-        sleep(Duration::from_millis(100)).await;
+        // Wait for the capture task to complete with timeout
+        if let Some(task) = self.capture_task.lock().await.take() {
+            match timeout(Duration::from_secs(3), task).await {
+                Ok(Ok(())) => {
+                    info!("Camera capture task completed successfully");
+                }
+                Ok(Err(e)) => {
+                    error!("Error waiting for capture task to complete: {}", e);
+                }
+                Err(_) => {
+                    warn!("Camera capture task did not complete within timeout, aborting");
+                }
+            }
+        }
         
         info!("Camera capture stopped");
         Ok(())
@@ -695,10 +726,11 @@ mod tests {
         let camera = CameraInterface {
             config,
             frame_counter: AtomicU64::new(0),
-            is_running: AtomicBool::new(false),
+            is_running: Arc::new(AtomicBool::new(false)),
             recovery: Arc::new(tokio::sync::Mutex::new(crate::recovery::CameraRecovery::new())),
             #[cfg(all(feature = "camera", target_os = "linux"))]
             device: None,
+            capture_task: Arc::new(tokio::sync::Mutex::new(None)),
         };
         
         assert!(camera.parse_format("MJPG").is_ok());

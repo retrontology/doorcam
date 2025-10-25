@@ -16,6 +16,9 @@ pub struct DisplayIntegration {
     config: DisplayConfig,
     event_bus: Arc<EventBus>,
     use_mock_touch: bool,
+    is_running: Arc<tokio::sync::RwLock<bool>>,
+    render_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    touch_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl DisplayIntegration {
@@ -33,6 +36,9 @@ impl DisplayIntegration {
             config,
             event_bus,
             use_mock_touch: false,
+            is_running: Arc::new(tokio::sync::RwLock::new(false)),
+            render_task: Arc::new(tokio::sync::Mutex::new(None)),
+            touch_task: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -47,25 +53,45 @@ impl DisplayIntegration {
         &self,
         ring_buffer: Arc<RingBuffer>,
     ) -> Result<()> {
+        let mut is_running = self.is_running.write().await;
+        if *is_running {
+            info!("Display integration is already running");
+            return Ok(());
+        }
+
         info!("Starting display integration");
 
         // Start display controller
         self.display_controller.start(Arc::clone(&self.event_bus)).await?;
 
         // Start touch input handler
-        if self.use_mock_touch {
+        let touch_task = if self.use_mock_touch {
             info!("Using mock touch input handler");
             let mock_handler = MockTouchInputHandler::new(Arc::clone(&self.event_bus));
-            mock_handler.start().await?;
+            Some(tokio::spawn(async move {
+                if let Err(e) = mock_handler.start().await {
+                    error!("Mock touch handler error: {}", e);
+                }
+            }))
         } else {
             info!("Using real touch input handler");
             let touch_handler = TouchInputHandler::new(&self.config, Arc::clone(&self.event_bus));
-            touch_handler.start().await?;
+            Some(tokio::spawn(async move {
+                if let Err(e) = touch_handler.start().await {
+                    error!("Touch handler error: {}", e);
+                }
+            }))
+        };
+
+        // Store touch task handle
+        if let Some(task) = touch_task {
+            *self.touch_task.lock().await = Some(task);
         }
 
         // Start frame rendering loop
         self.start_frame_rendering(ring_buffer).await?;
 
+        *is_running = true;
         info!("Display integration started successfully");
         Ok(())
     }
@@ -74,12 +100,18 @@ impl DisplayIntegration {
     async fn start_frame_rendering(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let display_controller = self.display_controller.clone();
         let event_bus = Arc::clone(&self.event_bus);
+        let is_running = Arc::clone(&self.is_running);
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let mut render_interval = interval(Duration::from_millis(33)); // ~30 FPS
 
-            loop {
+            while *is_running.read().await {
                 render_interval.tick().await;
+
+                // Check again after tick in case shutdown was requested during wait
+                if !*is_running.read().await {
+                    break;
+                }
 
                 // Only render if display is active
                 if display_controller.is_active() {
@@ -96,7 +128,12 @@ impl DisplayIntegration {
                     }
                 }
             }
+
+            info!("Display rendering loop stopped");
         });
+
+        // Store the task handle for proper cleanup
+        *self.render_task.lock().await = Some(task);
 
         Ok(())
     }
@@ -128,6 +165,39 @@ impl DisplayIntegration {
         }).await.map_err(|e| DoorcamError::component("display_integration".to_string(), e.to_string()))?;
         
         Ok(())
+    }
+
+    /// Stop the display integration
+    pub async fn stop(&self) -> Result<()> {
+        info!("Stopping display integration");
+
+        // Set running flag to false
+        {
+            let mut is_running = self.is_running.write().await;
+            *is_running = false;
+        }
+
+        // Wait for render task to complete
+        if let Some(task) = self.render_task.lock().await.take() {
+            if let Err(e) = task.await {
+                error!("Error waiting for render task to complete: {}", e);
+            }
+        }
+
+        // Wait for touch task to complete
+        if let Some(task) = self.touch_task.lock().await.take() {
+            if let Err(e) = task.await {
+                error!("Error waiting for touch task to complete: {}", e);
+            }
+        }
+
+        info!("Display integration stopped");
+        Ok(())
+    }
+
+    /// Check if the integration is currently running
+    pub async fn is_running(&self) -> bool {
+        *self.is_running.read().await
     }
 }
 

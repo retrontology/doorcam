@@ -5,6 +5,7 @@ use crate::ring_buffer::RingBuffer;
 use crate::error::{DoorcamError, Result};
 
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -89,7 +90,22 @@ impl MotionAnalyzerIntegration {
                         }
                     }
                     
-                    interval.tick().await;
+                    // Use timeout for interval tick to allow for faster shutdown
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_millis(100),
+                        interval.tick()
+                    ).await {
+                        Ok(_) => {}, // Normal tick
+                        Err(_) => continue, // Timeout, check shutdown flag again
+                    }
+                    
+                    // Check shutdown flag again after tick
+                    {
+                        let running = is_running_clone.read().await;
+                        if !*running {
+                            break;
+                        }
+                    }
                     
                     // Get the latest frame from the ring buffer
                     if let Some(frame) = ring_buffer.get_latest_frame().await {
@@ -100,16 +116,23 @@ impl MotionAnalyzerIntegration {
                         
                         last_frame_id = frame.id;
                         
-                        // Analyze the frame - now fully async compatible with imageproc
-                        let mut analyzer_guard = analyzer.write().await;
-                        match analyzer_guard.analyze_frame(&frame, &event_bus).await {
-                            Ok(Some(motion_area)) => {
+                        // Analyze the frame with timeout to prevent blocking shutdown
+                        let analysis_result = tokio::time::timeout(
+                            tokio::time::Duration::from_millis(500),
+                            async {
+                                let mut analyzer_guard = analyzer.write().await;
+                                analyzer_guard.analyze_frame(&frame, &event_bus).await
+                            }
+                        ).await;
+                        
+                        match analysis_result {
+                            Ok(Ok(Some(motion_area))) => {
                                 debug!("Motion detected with area: {:.2}", motion_area);
                             }
-                            Ok(None) => {
+                            Ok(Ok(None)) => {
                                 debug!("No motion detected in frame {}", frame.id);
                             }
-                            Err(e) => {
+                            Ok(Err(e)) => {
                                 error!("Motion analysis error: {}", e);
                                 
                                 // Publish system error event
@@ -119,6 +142,9 @@ impl MotionAnalyzerIntegration {
                                 }).await {
                                     error!("Failed to publish motion analysis error event: {}", publish_err);
                                 }
+                            }
+                            Err(_) => {
+                                warn!("Motion analysis timeout, skipping frame {}", frame.id);
                             }
                         }
                     } else {
@@ -154,8 +180,12 @@ impl MotionAnalyzerIntegration {
                     }
                 }
                 
-                match receiver.recv().await {
-                    Ok(event) => {
+                // Use timeout for event receiving to allow for faster shutdown
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    receiver.recv()
+                ).await {
+                    Ok(Ok(event)) => {
                         match event {
                             DoorcamEvent::SystemError { component, error } => {
                                 if component == "camera" {
@@ -173,9 +203,13 @@ impl MotionAnalyzerIntegration {
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         error!("Error receiving event: {}", e);
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                    Err(_) => {
+                        // Timeout, continue to check shutdown flag
+                        continue;
                     }
                 }
             }
@@ -201,16 +235,32 @@ impl MotionAnalyzerIntegration {
             *is_running = false;
         }
         
-        // Wait for tasks to complete
+        // Wait for tasks to complete with timeout
         if let Some(analysis_task) = self.analysis_task.take() {
-            if let Err(e) = analysis_task.await {
-                error!("Error waiting for analysis task to complete: {}", e);
+            match tokio::time::timeout(Duration::from_secs(3), analysis_task).await {
+                Ok(Ok(())) => {
+                    info!("Analysis task completed successfully");
+                }
+                Ok(Err(e)) => {
+                    error!("Error waiting for analysis task to complete: {}", e);
+                }
+                Err(_) => {
+                    warn!("Analysis task did not complete within timeout, aborting");
+                }
             }
         }
         
         if let Some(event_handler_task) = self.event_handler_task.take() {
-            if let Err(e) = event_handler_task.await {
-                error!("Error waiting for event handler task to complete: {}", e);
+            match tokio::time::timeout(Duration::from_secs(1), event_handler_task).await {
+                Ok(Ok(())) => {
+                    info!("Event handler task completed successfully");
+                }
+                Ok(Err(e)) => {
+                    error!("Error waiting for event handler task to complete: {}", e);
+                }
+                Err(_) => {
+                    warn!("Event handler task did not complete within timeout, aborting");
+                }
             }
         }
         

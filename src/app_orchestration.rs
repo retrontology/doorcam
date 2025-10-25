@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::signal;
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 /// Component lifecycle states
@@ -57,6 +58,7 @@ pub struct DoorcamOrchestrator {
     component_states: Arc<Mutex<HashMap<String, ComponentState>>>,
     shutdown_sender: Option<oneshot::Sender<ShutdownReason>>,
     shutdown_receiver: Option<oneshot::Receiver<ShutdownReason>>,
+    cancellation_token: CancellationToken,
 }
 
 impl DoorcamOrchestrator {
@@ -126,6 +128,7 @@ impl DoorcamOrchestrator {
             component_states: Arc::new(Mutex::new(HashMap::new())),
             shutdown_sender: Some(shutdown_sender),
             shutdown_receiver: Some(shutdown_receiver),
+            cancellation_token: CancellationToken::new(),
         })
     }
     
@@ -331,6 +334,9 @@ impl DoorcamOrchestrator {
     async fn shutdown(&mut self) -> Result<i32> {
         info!("Beginning graceful shutdown");
         
+        // Cancel all background tasks
+        self.cancellation_token.cancel();
+        
         let mut exit_code = 0;
         
         // Stop components in reverse dependency order
@@ -377,7 +383,7 @@ impl DoorcamOrchestrator {
         match component {
             "camera" => {
                 if let Some(camera_integration) = &self.camera_integration {
-                    match timeout(Duration::from_secs(5), camera_integration.stop()).await {
+                    match timeout(Duration::from_secs(10), camera_integration.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped).await;
                             info!("{} component stopped", component);
@@ -403,7 +409,7 @@ impl DoorcamOrchestrator {
             "analyzer" => {
                 if let Some(analyzer_integration) = &self.analyzer_integration {
                     let mut analyzer = analyzer_integration.lock().await;
-                    match timeout(Duration::from_secs(5), analyzer.stop()).await {
+                    match timeout(Duration::from_secs(10), analyzer.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped).await;
                             info!("{} component stopped", component);
@@ -429,6 +435,31 @@ impl DoorcamOrchestrator {
             "capture" => {
                 if let Some(capture_integration) = &self.capture_integration {
                     match timeout(Duration::from_secs(5), capture_integration.stop()).await {
+                        Ok(Ok(())) => {
+                            self.set_component_state(component, ComponentState::Stopped).await;
+                            info!("{} component stopped", component);
+                            Ok(())
+                        }
+                        Ok(Err(e)) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            error!("Error stopping {} component: {}", component, e);
+                            Err(e)
+                        }
+                        Err(_) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            let err = DoorcamError::System { message: format!("{} component stop timeout", component) };
+                            error!("{} component stop timeout", component);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    self.set_component_state(component, ComponentState::Stopped).await;
+                    Ok(())
+                }
+            }
+            "display" => {
+                if let Some(display_integration) = &self.display_integration {
+                    match timeout(Duration::from_secs(5), display_integration.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped).await;
                             info!("{} component stopped", component);

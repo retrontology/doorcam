@@ -80,6 +80,7 @@ display = ["dep:evdev"]
 name = "doorcam"
 path = "src/main.rs"
 
+
 [[example]]
 name = "display_demo"
 path = "examples/display_demo.rs"
