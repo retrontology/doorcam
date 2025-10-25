@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
     info!("Doorcam configuration loaded and validated");
 
     // Create and initialize the orchestrator
-    let mut orchestrator = DoorcamOrchestrator::new(config)
+    let mut orchestrator = DoorcamOrchestrator::new(config).await
         .map_err(|e| {
             error!("Failed to create orchestrator: {}", e);
             e
