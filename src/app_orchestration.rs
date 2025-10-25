@@ -3,6 +3,10 @@ use crate::error::{DoorcamError, Result};
 use crate::events::EventBus;
 use crate::ring_buffer::RingBuffer;
 use crate::integration::CameraRingBufferIntegration;
+use crate::analyzer_integration::MotionAnalyzerIntegration;
+use crate::display_integration::DisplayIntegration;
+use crate::capture_integration::VideoCaptureIntegration;
+use crate::storage_integration::EventStorageIntegration;
 
 #[cfg(feature = "streaming")]
 use crate::streaming::StreamServer;
@@ -42,6 +46,10 @@ pub struct DoorcamOrchestrator {
     
     // Components
     camera_integration: Option<CameraRingBufferIntegration>,
+    analyzer_integration: Option<Arc<Mutex<MotionAnalyzerIntegration>>>,
+    display_integration: Option<DisplayIntegration>,
+    capture_integration: Option<VideoCaptureIntegration>,
+    storage_integration: Option<EventStorageIntegration>,
     #[cfg(feature = "streaming")]
     stream_server: Option<StreamServer>,
     
@@ -64,6 +72,39 @@ impl DoorcamOrchestrator {
         // Initialize camera integration
         let camera_integration = Some(CameraRingBufferIntegration::new(config.clone()).await?);
         
+        // Initialize analyzer integration with camera's ring buffer
+        let camera_ring_buffer = if let Some(ref camera_integration) = camera_integration {
+            camera_integration.ring_buffer()
+        } else {
+            Arc::clone(&ring_buffer)
+        };
+        
+        let analyzer_integration = Some(Arc::new(Mutex::new(MotionAnalyzerIntegration::new(
+            config.analyzer.clone(),
+            camera_ring_buffer,
+            Arc::clone(&event_bus),
+        ).await?)));
+        
+        // Initialize display integration
+        let display_integration = Some(DisplayIntegration::new(
+            config.display.clone(),
+            Arc::clone(&event_bus),
+        ).await?);
+        
+        // Initialize capture integration
+        let capture_integration = Some(VideoCaptureIntegration::new(
+            config.capture.clone(),
+            Arc::clone(&event_bus),
+            Arc::clone(&ring_buffer),
+        ));
+        
+        // Initialize storage integration
+        let storage_integration = Some(EventStorageIntegration::builder()
+            .with_capture_config(config.capture.clone())
+            .with_system_config(config.system.clone())
+            .with_event_bus(Arc::clone(&event_bus))
+            .build()?);
+        
         #[cfg(feature = "streaming")]
         let stream_server = Some(StreamServer::new(
             config.stream.clone(),
@@ -76,6 +117,10 @@ impl DoorcamOrchestrator {
             event_bus,
             ring_buffer,
             camera_integration,
+            analyzer_integration,
+            display_integration,
+            capture_integration,
+            storage_integration,
             #[cfg(feature = "streaming")]
             stream_server,
             component_states: Arc::new(Mutex::new(HashMap::new())),
@@ -157,11 +202,65 @@ impl DoorcamOrchestrator {
             info!("Streaming server started on {}:{}", self.config.stream.ip, self.config.stream.port);
         }
         
-        // Mark other components as running (placeholders for now)
-        self.set_component_state("analyzer", ComponentState::Running).await;
-        self.set_component_state("display", ComponentState::Running).await;
-        self.set_component_state("capture", ComponentState::Running).await;
-        self.set_component_state("storage", ComponentState::Running).await;
+        // Start analyzer integration
+        if let Some(analyzer_integration) = &self.analyzer_integration {
+            self.set_component_state("analyzer", ComponentState::Starting).await;
+            
+            let mut analyzer = analyzer_integration.lock().await;
+            analyzer.start().await.map_err(|e| {
+                error!("Failed to start analyzer integration: {}", e);
+                e
+            })?;
+            
+            self.set_component_state("analyzer", ComponentState::Running).await;
+            info!("Analyzer integration started successfully");
+        }
+        
+        // Start display integration
+        if let Some(display_integration) = &self.display_integration {
+            self.set_component_state("display", ComponentState::Starting).await;
+            
+            // Use the ring buffer from camera integration if available
+            let ring_buffer = if let Some(camera_integration) = &self.camera_integration {
+                camera_integration.ring_buffer()
+            } else {
+                Arc::clone(&self.ring_buffer)
+            };
+            
+            display_integration.start(ring_buffer).await.map_err(|e| {
+                error!("Failed to start display integration: {}", e);
+                e
+            })?;
+            
+            self.set_component_state("display", ComponentState::Running).await;
+            info!("Display integration started successfully");
+        }
+        
+        // Start capture integration
+        if let Some(capture_integration) = &self.capture_integration {
+            self.set_component_state("capture", ComponentState::Starting).await;
+            
+            capture_integration.start().await.map_err(|e| {
+                error!("Failed to start capture integration: {}", e);
+                e
+            })?;
+            
+            self.set_component_state("capture", ComponentState::Running).await;
+            info!("Capture integration started successfully");
+        }
+        
+        // Start storage integration
+        if let Some(storage_integration) = &self.storage_integration {
+            self.set_component_state("storage", ComponentState::Starting).await;
+            
+            storage_integration.start().await.map_err(|e| {
+                error!("Failed to start storage integration: {}", e);
+                e
+            })?;
+            
+            self.set_component_state("storage", ComponentState::Running).await;
+            info!("Storage integration started successfully");
+        }
         
         info!("Doorcam system started successfully");
         Ok(())
@@ -279,6 +378,82 @@ impl DoorcamOrchestrator {
             "camera" => {
                 if let Some(camera_integration) = &self.camera_integration {
                     match timeout(Duration::from_secs(5), camera_integration.stop()).await {
+                        Ok(Ok(())) => {
+                            self.set_component_state(component, ComponentState::Stopped).await;
+                            info!("{} component stopped", component);
+                            Ok(())
+                        }
+                        Ok(Err(e)) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            error!("Error stopping {} component: {}", component, e);
+                            Err(e)
+                        }
+                        Err(_) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            let err = DoorcamError::System { message: format!("{} component stop timeout", component) };
+                            error!("{} component stop timeout", component);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    self.set_component_state(component, ComponentState::Stopped).await;
+                    Ok(())
+                }
+            }
+            "analyzer" => {
+                if let Some(analyzer_integration) = &self.analyzer_integration {
+                    let mut analyzer = analyzer_integration.lock().await;
+                    match timeout(Duration::from_secs(5), analyzer.stop()).await {
+                        Ok(Ok(())) => {
+                            self.set_component_state(component, ComponentState::Stopped).await;
+                            info!("{} component stopped", component);
+                            Ok(())
+                        }
+                        Ok(Err(e)) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            error!("Error stopping {} component: {}", component, e);
+                            Err(e)
+                        }
+                        Err(_) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            let err = DoorcamError::System { message: format!("{} component stop timeout", component) };
+                            error!("{} component stop timeout", component);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    self.set_component_state(component, ComponentState::Stopped).await;
+                    Ok(())
+                }
+            }
+            "capture" => {
+                if let Some(capture_integration) = &self.capture_integration {
+                    match timeout(Duration::from_secs(5), capture_integration.stop()).await {
+                        Ok(Ok(())) => {
+                            self.set_component_state(component, ComponentState::Stopped).await;
+                            info!("{} component stopped", component);
+                            Ok(())
+                        }
+                        Ok(Err(e)) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            error!("Error stopping {} component: {}", component, e);
+                            Err(e)
+                        }
+                        Err(_) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            let err = DoorcamError::System { message: format!("{} component stop timeout", component) };
+                            error!("{} component stop timeout", component);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    self.set_component_state(component, ComponentState::Stopped).await;
+                    Ok(())
+                }
+            }
+            "storage" => {
+                if let Some(storage_integration) = &self.storage_integration {
+                    match timeout(Duration::from_secs(5), storage_integration.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped).await;
                             info!("{} component stopped", component);
