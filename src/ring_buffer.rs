@@ -308,10 +308,6 @@ impl RingBuffer {
         
         let utilization = (occupied_slots * 100) / self.capacity;
         self.stats.utilization_percent.store(utilization as u64, Ordering::Relaxed);
-        
-        if utilization > 90 {
-            warn!("Ring buffer utilization high: {}%", utilization);
-        }
     }
     
     /// Get approximate number of frames currently in buffer
