@@ -70,12 +70,6 @@ impl StreamServer {
 
         info!("MJPEG server listening on {}", addr);
 
-        // Publish server start event
-        let _ = self.event_bus.publish(DoorcamEvent::SystemError {
-            component: "stream_server".to_string(),
-            error: format!("Server started on {}", addr),
-        }).await;
-
         axum::serve(listener, app)
             .await
             .map_err(|e| StreamError::StartupFailed { 
