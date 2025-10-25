@@ -2,7 +2,7 @@ use crate::frame::FrameData;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 /// Lock-free circular buffer for frame storage with preroll capability
 pub struct RingBuffer {
