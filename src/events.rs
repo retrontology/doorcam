@@ -987,7 +987,7 @@ mod pattern_tests {
         };
         
         // This should work since we have a subscriber
-        let result = event_bus.publish(test_event).await;
+        let _result = event_bus.publish(test_event).await;
         // Result may vary depending on buffer state, but the operation should complete
     }
 }    

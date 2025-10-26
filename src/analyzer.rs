@@ -538,37 +538,46 @@ mod tests {
         
         let mut analyzer = MotionAnalyzer::new(config).await.unwrap();
         
-        // Create a synthetic MJPEG frame (minimal JPEG header)
-        let jpeg_data = vec![
-            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-            0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
-            // ... (truncated for brevity - this would be a complete JPEG)
-            0xFF, 0xD9 // End of JPEG marker
-        ];
+        // Create a simple RGB24 frame instead of MJPEG to avoid decoding issues
+        let width = 64;
+        let height = 48;
+        let rgb_data = vec![128u8; (width * height * 3) as usize]; // Gray image
         
         let frame = FrameData::new(
             1,
             std::time::SystemTime::now(),
-            jpeg_data,
-            640,
-            480,
-            FrameFormat::Mjpeg,
+            rgb_data,
+            width,
+            height,
+            FrameFormat::Rgb24,
         );
         
-        // This test may fail if OpenCV can't decode the synthetic JPEG
-        // In a real implementation, we'd use actual camera frames
-        let result = analyzer.detect_motion_sync(&frame);
+        // Use timeout to prevent hanging
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || analyzer.detect_motion_sync(&frame))
+        ).await;
         
-        // We expect either a successful result or a specific error
         match result {
-            Ok(_) => {
-                // Motion detection succeeded
+            Ok(Ok(motion_result)) => {
+                // Motion detection completed successfully
+                match motion_result {
+                    Ok(_) => {
+                        // Motion detection succeeded
+                    }
+                    Err(crate::error::DoorcamError::Analyzer(_)) => {
+                        // Expected error with synthetic data
+                    }
+                    Err(e) => {
+                        panic!("Unexpected error: {}", e);
+                    }
+                }
             }
-            Err(crate::error::DoorcamError::Analyzer(_)) => {
-                // Expected error with synthetic data
+            Ok(Err(_)) => {
+                panic!("Task panicked during motion detection");
             }
-            Err(e) => {
-                panic!("Unexpected error: {}", e);
+            Err(_) => {
+                panic!("Motion detection timed out - this indicates a hanging operation");
             }
         }
     }
