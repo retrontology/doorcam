@@ -58,24 +58,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Supported Formats
+## Supported Format
 
-### Hardware Accelerated (Recommended)
-- **H264**: Full hardware decode via GPU (`v4l2h264dec`)
-- **MJPEG**: Hardware-assisted JPEG decode
+### MJPEG Only (Simplified)
+- **MJPEG**: High-quality JPEG frames captured directly from camera
+- No decoding/encoding overhead - JPEG data stored directly in ring buffer
+- Best quality with efficient storage and streaming
 
-### Software Fallback
-- **YUV/YUYV**: Raw formats, converted via GPU
-- **Auto**: Automatic format negotiation
+## Performance Benefits
 
-## Performance Comparison
-
-| Format | CPU Usage | GPU Usage | Max Resolution | Notes |
-|--------|-----------|-----------|----------------|-------|
-| H264 (HW) | ~5% | ~15% | 1920x1080@30fps | Recommended |
-| MJPEG (HW) | ~10% | ~10% | 1920x1080@30fps | Good fallback |
-| YUV (SW) | ~25% | ~5% | 1280x720@30fps | CPU intensive |
-| V4L2 Raw | ~40% | ~0% | 640x480@15fps | Not recommended |
+| Metric | V4L2 (Old) | GStreamer MJPEG (New) |
+|--------|------------|----------------------|
+| CPU Usage | ~40% | ~5% |
+| Memory Usage | High (RGB24) | Low (JPEG) |
+| Storage Efficiency | Poor | Excellent |
+| Streaming Ready | No | Yes |
+| Max Resolution | 720p@15fps | 1920x1080@30fps |
 
 ## Configuration
 
@@ -85,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 index = 0
 resolution = [1920, 1080]  # Full HD with hardware acceleration
 max_fps = 30
-format = "H264"  # Hardware decode
+format = "MJPEG"  # High-quality JPEG frames
 ```
 
 ### Memory Configuration

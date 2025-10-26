@@ -4,7 +4,7 @@
 index = 0
 resolution = [1920, 1080]  # Full HD
 max_fps = 30
-format = "H264"  # Hardware-accelerated H.264 encoding/decoding
+format = "MJPEG"  # High-quality MJPEG
 # rotation = "Rotate180"  # Uncomment if camera is mounted upside down
 
 [analyzer]

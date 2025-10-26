@@ -67,7 +67,7 @@ fn create_pi4_config() -> DoorcamConfig {
             index: 0,
             resolution: (1920, 1080), // Full HD for Pi 4
             max_fps: 30,
-            format: "H264".to_string(), // Hardware-accelerated H.264
+            format: "MJPEG".to_string(), // High-quality MJPEG
             rotation: None,
         },
         analyzer: AnalyzerConfig {

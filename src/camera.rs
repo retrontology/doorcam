@@ -80,62 +80,20 @@ impl CameraInterface {
         Ok(())
     }
     
-    /// Build GStreamer pipeline string with hardware acceleration
+    /// Build GStreamer pipeline string for MJPEG capture
     #[cfg(all(feature = "camera", target_os = "linux"))]
     fn build_pipeline_string(&self) -> Result<String> {
         let (width, height) = self.config.resolution;
         let fps = self.config.max_fps;
         let device_index = self.config.index;
         
-        // Pi 4 optimized pipeline with hardware acceleration
-        let pipeline = match self.config.format.to_uppercase().as_str() {
-            "H264" => {
-                // Hardware-accelerated H.264 capture and decode (Pi 4 optimized)
-                format!(
-                    "v4l2src device=/dev/video{} ! \
-                     video/x-h264,width={},height={},framerate={}/1 ! \
-                     v4l2h264dec ! \
-                     videoconvert ! \
-                     video/x-raw,format=RGB ! \
-                     appsink name=sink sync=false max-buffers=2 drop=true",
-                    device_index, width, height, fps
-                )
-            }
-            "MJPEG" | "MJPG" => {
-                // MJPEG with hardware decode if available
-                format!(
-                    "v4l2src device=/dev/video{} ! \
-                     image/jpeg,width={},height={},framerate={}/1 ! \
-                     jpegdec ! \
-                     videoconvert ! \
-                     video/x-raw,format=RGB ! \
-                     appsink name=sink sync=false max-buffers=2 drop=true",
-                    device_index, width, height, fps
-                )
-            }
-            "YUV" | "YUYV" => {
-                // Raw YUV capture
-                format!(
-                    "v4l2src device=/dev/video{} ! \
-                     video/x-raw,format=YUY2,width={},height={},framerate={}/1 ! \
-                     videoconvert ! \
-                     video/x-raw,format=RGB ! \
-                     appsink name=sink sync=false max-buffers=2 drop=true",
-                    device_index, width, height, fps
-                )
-            }
-            _ => {
-                // Default to auto-negotiation
-                format!(
-                    "v4l2src device=/dev/video{} ! \
-                     video/x-raw,width={},height={},framerate={}/1 ! \
-                     videoconvert ! \
-                     video/x-raw,format=RGB ! \
-                     appsink name=sink sync=false max-buffers=2 drop=true",
-                    device_index, width, height, fps
-                )
-            }
-        };
+        // Simple MJPEG pipeline - capture JPEG frames directly without decoding
+        let pipeline = format!(
+            "v4l2src device=/dev/video{} ! \
+             image/jpeg,width={},height={},framerate={}/1 ! \
+             appsink name=sink sync=false max-buffers=2 drop=true",
+            device_index, width, height, fps
+        );
         
         Ok(pipeline)
     }
@@ -280,17 +238,18 @@ impl CameraInterface {
         let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now();
         
+        // Store the raw JPEG data directly - much more efficient!
         let frame_data = FrameData::new(
             frame_id,
             timestamp,
             map.as_slice().to_vec(),
             width,
             height,
-            FrameFormat::Rgb24, // GStreamer converts to RGB
+            FrameFormat::Mjpeg, // Store as MJPEG
         );
         
         trace!(
-            "Processed GStreamer frame {} ({}x{}, {} bytes)",
+            "Captured MJPEG frame {} ({}x{}, {} bytes)",
             frame_id,
             width,
             height,
@@ -327,17 +286,29 @@ impl CameraInterface {
                 let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
                 let timestamp = SystemTime::now();
                 
+                // Generate mock MJPEG frame data (minimal JPEG header + data)
                 let width = config.resolution.0;
                 let height = config.resolution.1;
-                let frame_size = (width * height * 3) as usize;
-                let mut data = vec![0u8; frame_size];
                 
-                let color = ((frame_id % 256) as u8, 128u8, ((255 - frame_id % 256) as u8));
-                for chunk in data.chunks_mut(3) {
-                    chunk[0] = color.0;
-                    chunk[1] = color.1;
-                    chunk[2] = color.2;
-                }
+                // Create a minimal mock JPEG frame (just header bytes for testing)
+                let mut data = vec![
+                    0xFF, 0xD8, // JPEG SOI (Start of Image)
+                    0xFF, 0xE0, // JFIF marker
+                    0x00, 0x10, // Length
+                    0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
+                    0x01, 0x01, // Version 1.1
+                    0x01, // Units (1 = pixels per inch)
+                    0x00, 0x48, 0x00, 0x48, // X and Y density (72 DPI)
+                    0x00, 0x00, // Thumbnail width and height (0 = no thumbnail)
+                ];
+                
+                // Add some mock image data based on frame ID
+                let pattern_size = 1000 + (frame_id % 500) as usize;
+                let pattern_byte = (frame_id % 256) as u8;
+                data.extend(vec![pattern_byte; pattern_size]);
+                
+                // Add JPEG EOI (End of Image)
+                data.extend_from_slice(&[0xFF, 0xD9]);
                 
                 let frame_data = FrameData::new(
                     frame_id,
@@ -345,10 +316,10 @@ impl CameraInterface {
                     data,
                     width,
                     height,
-                    FrameFormat::Rgb24,
+                    FrameFormat::Mjpeg,
                 );
                 
-                trace!("Generated mock GStreamer frame {} ({}x{})", frame_id, width, height);
+                trace!("Generated mock MJPEG frame {} ({}x{}, {} bytes)", frame_id, width, height, data.len());
                 ring_buffer.push_frame(frame_data).await;
             }
             
