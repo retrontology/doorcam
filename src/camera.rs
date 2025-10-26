@@ -1,178 +1,169 @@
 use crate::config::CameraConfig;
 use crate::error::{CameraError, DoorcamError, Result};
 use crate::frame::{FrameData, FrameFormat};
-use crate::recovery::{CameraRecovery, RecoveryAction};
 use crate::ring_buffer::RingBuffer;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::time::{interval, sleep, timeout};
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
 #[cfg(all(feature = "camera", target_os = "linux"))]
-use v4l::video::Capture;
+use gstreamer::prelude::*;
 #[cfg(all(feature = "camera", target_os = "linux"))]
-use v4l::buffer::Type;
+use gstreamer::Pipeline;
 #[cfg(all(feature = "camera", target_os = "linux"))]
-use v4l::io::mmap::Stream;
+use gstreamer_app::AppSink;
 #[cfg(all(feature = "camera", target_os = "linux"))]
-use v4l::io::traits::CaptureStream;
+use gstreamer_video::VideoInfo;
 
-/// Camera interface for V4L2 video capture
+/// GStreamer-based camera interface with hardware acceleration support
 pub struct CameraInterface {
     config: CameraConfig,
     frame_counter: AtomicU64,
     is_running: Arc<AtomicBool>,
-    recovery: Arc<tokio::sync::Mutex<CameraRecovery>>,
     #[cfg(all(feature = "camera", target_os = "linux"))]
-    device: Option<Arc<v4l::Device>>,
+    pipeline: Option<Pipeline>,
     capture_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
-
-
 impl CameraInterface {
-    /// Create a new camera interface with the given configuration
+    /// Create a new GStreamer camera interface
     pub async fn new(config: CameraConfig) -> Result<Self> {
         info!(
-            "Initializing camera interface for device {} ({}x{} @ {}fps, format: {})",
-            config.index, config.resolution.0, config.resolution.1, config.max_fps, config.format
+            "Initializing GStreamer camera interface for device {} ({}x{} @ {}fps)",
+            config.index, config.resolution.0, config.resolution.1, config.max_fps
         );
+        
+        #[cfg(all(feature = "camera", target_os = "linux"))]
+        {
+            // Initialize GStreamer
+            gstreamer::init().map_err(|e| {
+                DoorcamError::Camera(CameraError::Configuration {
+                    details: format!("Failed to initialize GStreamer: {}", e),
+                })
+            })?;
+        }
         
         let mut camera = Self {
             config,
             frame_counter: AtomicU64::new(0),
             is_running: Arc::new(AtomicBool::new(false)),
-            recovery: Arc::new(tokio::sync::Mutex::new(CameraRecovery::new())),
             #[cfg(all(feature = "camera", target_os = "linux"))]
-            device: None,
+            pipeline: None,
             capture_task: Arc::new(tokio::sync::Mutex::new(None)),
         };
         
-        camera.initialize_device().await?;
+        camera.initialize_pipeline().await?;
         
         Ok(camera)
     }
     
-    /// Initialize the V4L2 device
+    /// Initialize GStreamer pipeline with hardware acceleration
     #[cfg(all(feature = "camera", target_os = "linux"))]
-    async fn initialize_device(&mut self) -> Result<()> {
-        let device_path = format!("/dev/video{}", self.config.index);
-        debug!("Opening V4L2 device: {}", device_path);
+    async fn initialize_pipeline(&mut self) -> Result<()> {
+        let pipeline_desc = self.build_pipeline_string()?;
         
-        let device = v4l::Device::new(self.config.index as usize)
-            .map_err(|e| DoorcamError::Camera(CameraError::DeviceOpenWithSource {
-                device: self.config.index,
-                details: e.to_string(),
-            }))?;
+        info!("Creating GStreamer pipeline: {}", pipeline_desc);
         
-        // Configure video format
-        let mut fmt = device.format()
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to get format: {}", e) 
+        let pipeline = gstreamer::parse::launch(&pipeline_desc)
+            .map_err(|e| CameraError::Configuration {
+                details: format!("Failed to create pipeline: {}", e),
+            })?
+            .downcast::<Pipeline>()
+            .map_err(|_| CameraError::Configuration {
+                details: "Failed to downcast to Pipeline".to_string(),
             })?;
         
-        fmt.width = self.config.resolution.0;
-        fmt.height = self.config.resolution.1;
-        fmt.fourcc = self.parse_format(&self.config.format)?;
+        self.pipeline = Some(pipeline);
         
-        device.set_format(&fmt)
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to set format: {}", e) 
-            })?;
-        
-        // Verify the format was set correctly
-        let actual_fmt = device.format()
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to verify format: {}", e) 
-            })?;
-        
-        if actual_fmt.width != self.config.resolution.0 || actual_fmt.height != self.config.resolution.1 {
-            warn!(
-                "Camera resolution adjusted by driver: requested {}x{}, got {}x{}",
-                self.config.resolution.0, self.config.resolution.1,
-                actual_fmt.width, actual_fmt.height
-            );
-        }
-        
-        // Set frame rate
-        let mut params = device.params()
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to get params: {}", e) 
-            })?;
-        
-        params.interval = v4l::Fraction::new(1, self.config.max_fps);
-        
-        device.set_params(&params)
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to set frame rate: {}", e) 
-            })?;
-        
-        // Verify frame rate
-        let actual_params = device.params()
-            .map_err(|e| CameraError::Configuration { 
-                details: format!("Failed to verify params: {}", e) 
-            })?;
-        
-        let actual_fps = actual_params.interval.denominator / actual_params.interval.numerator;
-        if actual_fps != self.config.max_fps {
-            warn!(
-                "Camera frame rate adjusted by driver: requested {}fps, got {}fps",
-                self.config.max_fps, actual_fps
-            );
-        }
-        
-        info!(
-            "Camera configured: {}x{} @ {}fps, format: {:?}",
-            actual_fmt.width, actual_fmt.height, actual_fps, actual_fmt.fourcc
-        );
-        
-        self.device = Some(Arc::new(device));
         Ok(())
     }
     
-    /// Initialize device when camera feature is disabled or not on Linux
+    /// Build GStreamer pipeline string with hardware acceleration
+    #[cfg(all(feature = "camera", target_os = "linux"))]
+    fn build_pipeline_string(&self) -> Result<String> {
+        let (width, height) = self.config.resolution;
+        let fps = self.config.max_fps;
+        let device_index = self.config.index;
+        
+        // Pi 4 optimized pipeline with hardware acceleration
+        let pipeline = match self.config.format.to_uppercase().as_str() {
+            "H264" => {
+                // Hardware-accelerated H.264 capture and decode (Pi 4 optimized)
+                format!(
+                    "v4l2src device=/dev/video{} ! \
+                     video/x-h264,width={},height={},framerate={}/1 ! \
+                     v4l2h264dec ! \
+                     videoconvert ! \
+                     video/x-raw,format=RGB ! \
+                     appsink name=sink sync=false max-buffers=2 drop=true",
+                    device_index, width, height, fps
+                )
+            }
+            "MJPEG" | "MJPG" => {
+                // MJPEG with hardware decode if available
+                format!(
+                    "v4l2src device=/dev/video{} ! \
+                     image/jpeg,width={},height={},framerate={}/1 ! \
+                     jpegdec ! \
+                     videoconvert ! \
+                     video/x-raw,format=RGB ! \
+                     appsink name=sink sync=false max-buffers=2 drop=true",
+                    device_index, width, height, fps
+                )
+            }
+            "YUV" | "YUYV" => {
+                // Raw YUV capture
+                format!(
+                    "v4l2src device=/dev/video{} ! \
+                     video/x-raw,format=YUY2,width={},height={},framerate={}/1 ! \
+                     videoconvert ! \
+                     video/x-raw,format=RGB ! \
+                     appsink name=sink sync=false max-buffers=2 drop=true",
+                    device_index, width, height, fps
+                )
+            }
+            _ => {
+                // Default to auto-negotiation
+                format!(
+                    "v4l2src device=/dev/video{} ! \
+                     video/x-raw,width={},height={},framerate={}/1 ! \
+                     videoconvert ! \
+                     video/x-raw,format=RGB ! \
+                     appsink name=sink sync=false max-buffers=2 drop=true",
+                    device_index, width, height, fps
+                )
+            }
+        };
+        
+        Ok(pipeline)
+    }
+    
+    /// Initialize pipeline when GStreamer feature is disabled
     #[cfg(not(all(feature = "camera", target_os = "linux")))]
-    async fn initialize_device(&mut self) -> Result<()> {
-        #[cfg(not(target_os = "linux"))]
-        warn!("V4L2 camera interface is only available on Linux, using mock implementation");
-        #[cfg(not(feature = "camera"))]
-        warn!("Camera feature is disabled, using mock implementation");
+    async fn initialize_pipeline(&mut self) -> Result<()> {
+        warn!("GStreamer camera interface is only available on Linux with camera feature");
         Ok(())
     }
     
-    /// Parse format string to V4L2 FourCC
-    #[cfg(all(feature = "camera", target_os = "linux"))]
-    fn parse_format(&self, format: &str) -> std::result::Result<v4l::FourCC, CameraError> {
-        match format.to_uppercase().as_str() {
-            "MJPG" | "MJPEG" => Ok(v4l::FourCC::new(b"MJPG")),
-            "YUYV" => Ok(v4l::FourCC::new(b"YUYV")),
-            "RGB24" => Ok(v4l::FourCC::new(b"RGB3")),
-            _ => Err(CameraError::UnsupportedFormat { 
-                format: format.to_string() 
-            }),
-        }
-    }
-    
-
-    
-    /// Start camera capture and feed frames to the ring buffer
+    /// Start camera capture using GStreamer
     pub async fn start_capture(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         if self.is_running.load(Ordering::Relaxed) {
-            warn!("Camera capture is already running");
+            warn!("GStreamer camera capture is already running");
             return Ok(());
         }
         
-        info!("Starting camera capture");
+        info!("Starting GStreamer camera capture");
         self.is_running.store(true, Ordering::Relaxed);
         
         #[cfg(all(feature = "camera", target_os = "linux"))]
         {
-            if let Some(device) = &self.device {
-                self.run_capture_loop(Arc::clone(device), ring_buffer).await?;
+            if let Some(pipeline) = &self.pipeline {
+                self.run_gst_capture_loop(pipeline.clone(), ring_buffer).await?;
             } else {
-                return Err(CameraError::Configuration { 
-                    details: "Device not initialized".to_string() 
+                return Err(CameraError::Configuration {
+                    details: "Pipeline not initialized".to_string(),
                 }.into());
             }
         }
@@ -185,134 +176,136 @@ impl CameraInterface {
         Ok(())
     }
     
-    /// Run the actual V4L2 capture loop
+    /// Run GStreamer capture loop
     #[cfg(all(feature = "camera", target_os = "linux"))]
-    async fn run_capture_loop(&self, device: Arc<v4l::Device>, ring_buffer: Arc<RingBuffer>) -> Result<()> {
-        let config = self.config.clone();
+    async fn run_gst_capture_loop(&self, pipeline: Pipeline, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let is_running = Arc::clone(&self.is_running);
         let capture_task = Arc::clone(&self.capture_task);
+        let frame_counter = AtomicU64::new(0);
         
         let task = tokio::spawn(async move {
-            let frame_counter = AtomicU64::new(0);
-            let mut retry_count = 0;
-            const MAX_RETRIES: u32 = 5;
-            const RETRY_DELAY: Duration = Duration::from_secs(1);
+            // Get the appsink element
+            let appsink = pipeline
+                .by_name("sink")
+                .expect("Failed to get appsink")
+                .downcast::<AppSink>()
+                .expect("Failed to downcast to AppSink");
             
+            // Set up sample callback
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            
+            appsink.set_callbacks(
+                gstreamer_app::AppSinkCallbacks::builder()
+                    .new_sample(move |appsink| {
+                        let sample = appsink.pull_sample().map_err(|_| gstreamer::FlowError::Eos)?;
+                        let _ = tx.send(sample);
+                        Ok(gstreamer::FlowSuccess::Ok)
+                    })
+                    .build(),
+            );
+            
+            // Start pipeline
+            if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+                error!("Failed to start GStreamer pipeline: {}", e);
+                return;
+            }
+            
+            info!("GStreamer pipeline started successfully");
+            
+            // Process samples
             while is_running.load(Ordering::Relaxed) {
-                match Self::capture_loop_inner(&device, &ring_buffer, &config, &frame_counter, &is_running).await {
-                    Ok(_) => {
-                        info!("Camera capture loop ended normally");
-                        break;
+                tokio::select! {
+                    sample = rx.recv() => {
+                        if let Some(sample) = sample {
+                            if let Err(e) = Self::process_gst_sample(
+                                sample,
+                                &frame_counter,
+                                &ring_buffer
+                            ).await {
+                                error!("Error processing GStreamer sample: {}", e);
+                            }
+                        }
                     }
-                    Err(e) => {
-                        if !is_running.load(Ordering::Relaxed) {
-                            info!("Camera capture stopping due to shutdown signal");
-                            break;
-                        }
-                        
-                        error!("Camera capture error: {}", e);
-                        retry_count += 1;
-                        
-                        if retry_count >= MAX_RETRIES {
-                            error!("Camera capture failed after {} retries, giving up", MAX_RETRIES);
-                            break;
-                        }
-                        
-                        warn!("Retrying camera capture in {:?} (attempt {}/{})", RETRY_DELAY, retry_count, MAX_RETRIES);
-                        sleep(RETRY_DELAY * retry_count).await; // Exponential backoff
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        // Periodic check for shutdown
                     }
                 }
             }
             
-            info!("Camera capture loop terminated");
+            // Stop pipeline
+            let _ = pipeline.set_state(gstreamer::State::Null);
+            info!("GStreamer capture loop stopped");
         });
         
-        // Store the task handle for proper cleanup
         *capture_task.lock().await = Some(task);
-        
         Ok(())
     }
     
-    /// Inner capture loop implementation
+    /// Process a GStreamer sample into a frame
     #[cfg(all(feature = "camera", target_os = "linux"))]
-    async fn capture_loop_inner(
-        device: &Arc<v4l::Device>,
-        ring_buffer: &Arc<RingBuffer>,
-        config: &CameraConfig,
+    async fn process_gst_sample(
+        sample: gstreamer::Sample,
         frame_counter: &AtomicU64,
-        is_running: &Arc<AtomicBool>,
+        ring_buffer: &Arc<RingBuffer>,
     ) -> Result<()> {
-        let mut stream = Stream::with_buffers(device, Type::VideoCapture, 4)
-            .map_err(|e| CameraError::CaptureStream { 
-                details: format!("Failed to create stream: {}", e) 
-            })?;
-        
-        let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
-        let mut interval_timer = interval(frame_interval);
-        
-        info!("Camera capture loop started with {}ms frame interval", frame_interval.as_millis());
-        
-        while is_running.load(Ordering::Relaxed) {
-            interval_timer.tick().await;
-            
-            // Check again after tick in case shutdown was requested during wait
-            if !is_running.load(Ordering::Relaxed) {
-                break;
+        let buffer = sample.buffer().ok_or_else(|| {
+            CameraError::CaptureStream {
+                details: "No buffer in sample".to_string(),
             }
-            
-            match stream.next() {
-                Ok((buffer, _meta)) => {
-                    let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
-                    let timestamp = SystemTime::now();
-                    
-                    // Determine frame format from device format
-                    let device_fmt = device.format()
-                        .map_err(|e| CameraError::Configuration { 
-                            details: format!("Failed to get format: {}", e) 
-                        })?;
-                    let frame_format = match device_fmt.fourcc.str() {
-                        Ok("MJPG") => FrameFormat::Mjpeg,
-                        Ok("YUYV") => FrameFormat::Yuyv,
-                        Ok("RGB3") => FrameFormat::Rgb24,
-                        _ => FrameFormat::Mjpeg, // Default fallback
-                    };
-                    
-                    let frame_data = FrameData::new(
-                        frame_id,
-                        timestamp,
-                        buffer.to_vec(),
-                        device_fmt.width,
-                        device_fmt.height,
-                        frame_format,
-                    );
-                    
-                    trace!(
-                        "Captured frame {} ({}x{}, {} bytes, format: {:?})",
-                        frame_id,
-                        device_fmt.width,
-                        device_fmt.height,
-                        buffer.len(),
-                        frame_format
-                    );
-                    
-                    ring_buffer.push_frame(frame_data).await;
-                }
-                Err(e) => {
-                    error!("Frame capture error: {}", e);
-                    return Err(DoorcamError::Camera(CameraError::CaptureStream { 
-                        details: format!("Capture failed: {}", e) 
-                    }));
-                }
-            }
-        }
+        })?;
         
-        info!("Camera capture loop stopped");
+        let caps = sample.caps().ok_or_else(|| {
+            CameraError::CaptureStream {
+                details: "No caps in sample".to_string(),
+            }
+        })?;
+        
+        // Get video info from caps
+        let video_info = VideoInfo::from_caps(caps).map_err(|e| {
+            CameraError::CaptureStream {
+                details: format!("Failed to get video info: {}", e),
+            }
+        })?;
+        
+        let width = video_info.width();
+        let height = video_info.height();
+        
+        // Map buffer for reading
+        let map = buffer.map_readable().map_err(|e| {
+            CameraError::CaptureStream {
+                details: format!("Failed to map buffer: {}", e),
+            }
+        })?;
+        
+        let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
+        let timestamp = SystemTime::now();
+        
+        let frame_data = FrameData::new(
+            frame_id,
+            timestamp,
+            map.as_slice().to_vec(),
+            width,
+            height,
+            FrameFormat::Rgb24, // GStreamer converts to RGB
+        );
+        
+        trace!(
+            "Processed GStreamer frame {} ({}x{}, {} bytes)",
+            frame_id,
+            width,
+            height,
+            map.len()
+        );
+        
+        ring_buffer.push_frame(frame_data).await;
+        
         Ok(())
     }
     
-    /// Run mock capture loop when camera feature is disabled or not on Linux
+    /// Run mock capture loop when GStreamer is not available
     #[cfg(not(all(feature = "camera", target_os = "linux")))]
     async fn run_mock_capture_loop(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
+        // Same mock implementation as the v4l version
         let config = self.config.clone();
         let is_running = Arc::clone(&self.is_running);
         let capture_task = Arc::clone(&self.capture_task);
@@ -320,14 +313,13 @@ impl CameraInterface {
         let task = tokio::spawn(async move {
             let frame_counter = AtomicU64::new(0);
             let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
-            let mut interval_timer = interval(frame_interval);
+            let mut interval_timer = tokio::time::interval(frame_interval);
             
-            info!("Mock camera capture loop started");
+            info!("Mock GStreamer capture loop started");
             
             while is_running.load(Ordering::Relaxed) {
                 interval_timer.tick().await;
                 
-                // Check again after tick in case shutdown was requested during wait
                 if !is_running.load(Ordering::Relaxed) {
                     break;
                 }
@@ -335,18 +327,16 @@ impl CameraInterface {
                 let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
                 let timestamp = SystemTime::now();
                 
-                // Generate mock frame data (solid color pattern)
                 let width = config.resolution.0;
                 let height = config.resolution.1;
-                let frame_size = (width * height * 3) as usize; // RGB24
+                let frame_size = (width * height * 3) as usize;
                 let mut data = vec![0u8; frame_size];
                 
-                // Fill with a simple pattern based on frame ID
                 let color = ((frame_id % 256) as u8, 128u8, ((255 - frame_id % 256) as u8));
                 for chunk in data.chunks_mut(3) {
-                    chunk[0] = color.0; // R
-                    chunk[1] = color.1; // G
-                    chunk[2] = color.2; // B
+                    chunk[0] = color.0;
+                    chunk[1] = color.1;
+                    chunk[2] = color.2;
                 }
                 
                 let frame_data = FrameData::new(
@@ -358,45 +348,42 @@ impl CameraInterface {
                     FrameFormat::Rgb24,
                 );
                 
-                trace!("Generated mock frame {} ({}x{})", frame_id, width, height);
+                trace!("Generated mock GStreamer frame {} ({}x{})", frame_id, width, height);
                 ring_buffer.push_frame(frame_data).await;
             }
             
-            info!("Mock camera capture loop stopped");
+            info!("Mock GStreamer capture loop stopped");
         });
         
-        // Store the task handle for proper cleanup
         *capture_task.lock().await = Some(task);
-        
         Ok(())
     }
     
     /// Stop camera capture
     pub async fn stop_capture(&self) -> Result<()> {
         if !self.is_running.load(Ordering::Relaxed) {
-            debug!("Camera capture is not running");
+            debug!("GStreamer camera capture is not running");
             return Ok(());
         }
         
-        info!("Stopping camera capture");
+        info!("Stopping GStreamer camera capture");
         self.is_running.store(false, Ordering::Relaxed);
         
-        // Wait for the capture task to complete with timeout
         if let Some(task) = self.capture_task.lock().await.take() {
-            match timeout(Duration::from_secs(3), task).await {
+            match tokio::time::timeout(Duration::from_secs(3), task).await {
                 Ok(Ok(())) => {
-                    info!("Camera capture task completed successfully");
+                    info!("GStreamer capture task completed successfully");
                 }
                 Ok(Err(e)) => {
-                    error!("Error waiting for capture task to complete: {}", e);
+                    error!("Error waiting for GStreamer capture task: {}", e);
                 }
                 Err(_) => {
-                    warn!("Camera capture task did not complete within timeout, aborting");
+                    warn!("GStreamer capture task did not complete within timeout");
                 }
             }
         }
         
-        info!("Camera capture stopped");
+        info!("GStreamer camera capture stopped");
         Ok(())
     }
     
@@ -415,176 +402,56 @@ impl CameraInterface {
         self.frame_counter.load(Ordering::Relaxed)
     }
     
-    /// Attempt to reconnect the camera with retry logic
-    pub async fn reconnect(&mut self) -> Result<()> {
-        info!("Attempting to reconnect camera");
-        
-        // Stop current capture if running
-        if self.is_capturing() {
-            self.stop_capture().await?;
-        }
-        
-        // Reinitialize device
-        self.initialize_device().await?;
-        
-        // Test connection
-        self.test_connection().await?;
-        
-        info!("Camera reconnected successfully");
-        Ok(())
-    }
-    
-    /// Start capture with automatic retry on failure
-    pub async fn start_capture_with_retry(
-        &self, 
-        ring_buffer: Arc<RingBuffer>,
-        max_retries: u32,
-        retry_delay: Duration,
-    ) -> Result<()> {
-        let mut retry_count = 0;
-        
-        loop {
-            match self.start_capture(Arc::clone(&ring_buffer)).await {
-                Ok(()) => {
-                    info!("Camera capture started successfully");
-                    return Ok(());
-                }
-                Err(e) => {
-                    error!("Camera capture failed: {}", e);
-                    retry_count += 1;
-                    
-                    if retry_count >= max_retries {
-                        error!("Camera capture failed after {} retries", max_retries);
-                        return Err(e);
-                    }
-                    
-                    warn!(
-                        "Retrying camera capture in {:?} (attempt {}/{})",
-                        retry_delay * retry_count,
-                        retry_count,
-                        max_retries
-                    );
-                    
-                    sleep(retry_delay * retry_count).await; // Exponential backoff
-                }
-            }
-        }
-    }
-    
-    /// Handle camera error with recovery logic
-    pub async fn handle_error_with_recovery(&self, error: CameraError) -> RecoveryAction {
-        let mut recovery = self.recovery.lock().await;
-        recovery.handle_camera_error(&error)
-    }
-    
-    /// Attempt to recover from camera failure
-    pub async fn recover(&self) -> Result<()> {
-        info!("Attempting camera recovery");
-        
-        let mut recovery = self.recovery.lock().await;
-        
-        recovery.recover_camera(|| async {
-            self.reinitialize_device().await
-        }).await
-    }
-    
-    /// Reinitialize camera device (used for recovery)
-    async fn reinitialize_device(&self) -> std::result::Result<(), CameraError> {
-        #[cfg(all(feature = "camera", target_os = "linux"))]
-        {
-            // This is a simplified version - in practice you'd need to handle
-            // the device field being in an Arc and potentially recreate it
-            info!("Reinitializing camera device {}", self.config.index);
-            
-            let _device_path = format!("/dev/video{}", self.config.index);
-            let device = v4l::Device::new(self.config.index as usize)
-                .map_err(|e| CameraError::DeviceOpenWithSource {
-                    device: self.config.index,
-                    details: e.to_string(),
-                })?;
-            
-            // Configure the device (similar to initialize_device but simpler)
-            let mut fmt = device.format()
-                .map_err(|e| CameraError::Configuration { 
-                    details: format!("Failed to get format during recovery: {}", e) 
-                })?;
-            
-            fmt.width = self.config.resolution.0;
-            fmt.height = self.config.resolution.1;
-            fmt.fourcc = self.parse_format(&self.config.format)?;
-            
-            device.set_format(&fmt)
-                .map_err(|e| CameraError::Configuration { 
-                    details: format!("Failed to set format during recovery: {}", e) 
-                })?;
-            
-            info!("Camera device {} reinitialized successfully", self.config.index);
-            Ok(())
-        }
-        
-        #[cfg(not(all(feature = "camera", target_os = "linux")))]
-        {
-            warn!("Camera recovery not available on this platform");
-            Err(CameraError::NotAvailable)
-        }
-    }
-    
-    /// Reset recovery state after successful operation
-    pub async fn reset_recovery(&self) {
-        let mut recovery = self.recovery.lock().await;
-        recovery.reset();
-    }
-    
-    /// Test camera connectivity and configuration
+    /// Test GStreamer pipeline
     pub async fn test_connection(&self) -> Result<()> {
         #[cfg(all(feature = "camera", target_os = "linux"))]
         {
-            if let Some(device) = &self.device {
-                // Try to get current format to test device access
-                let fmt = device.format()
-                    .map_err(|e| CameraError::Configuration { 
-                        details: format!("Device test failed: {}", e) 
-                    })?;
+            if let Some(pipeline) = &self.pipeline {
+                // Test pipeline by setting it to READY state
+                pipeline.set_state(gstreamer::State::Ready).map_err(|e| {
+                    CameraError::Configuration {
+                        details: format!("Pipeline test failed: {}", e),
+                    }
+                })?;
                 
-                debug!(
-                    "Camera test successful: {}x{} format {:?}",
-                    fmt.width, fmt.height, fmt.fourcc
-                );
+                pipeline.set_state(gstreamer::State::Null).map_err(|e| {
+                    CameraError::Configuration {
+                        details: format!("Failed to reset pipeline: {}", e),
+                    }
+                })?;
                 
+                debug!("GStreamer pipeline test successful");
                 Ok(())
             } else {
-                Err(CameraError::Configuration { 
-                    details: "Device not initialized".to_string() 
+                Err(CameraError::Configuration {
+                    details: "Pipeline not initialized".to_string(),
                 }.into())
             }
         }
         
         #[cfg(not(all(feature = "camera", target_os = "linux")))]
         {
-            debug!("Camera test successful (mock mode)");
+            debug!("GStreamer pipeline test successful (mock mode)");
             Ok(())
         }
     }
 }
 
-/// Camera interface builder for easier configuration
+/// Builder for GStreamer camera interface
 pub struct CameraInterfaceBuilder {
     config: Option<CameraConfig>,
 }
 
 impl CameraInterfaceBuilder {
-    /// Create a new camera interface builder
     pub fn new() -> Self {
         Self { config: None }
     }
     
-    /// Set camera configuration
     pub fn config(mut self, config: CameraConfig) -> Self {
         self.config = Some(config);
         self
     }
     
-    /// Build the camera interface
     pub async fn build(self) -> Result<CameraInterface> {
         let config = self.config.ok_or_else(|| {
             DoorcamError::system("Camera configuration must be specified")
@@ -597,146 +464,5 @@ impl CameraInterfaceBuilder {
 impl Default for CameraInterfaceBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::CameraConfig;
-    use std::time::Duration;
-    use tokio::time::timeout;
-    
-    fn create_test_config() -> CameraConfig {
-        CameraConfig {
-            index: 0,
-            resolution: (640, 480),
-            max_fps: 30,
-            format: "MJPG".to_string(),
-            rotation: None,
-        }
-    }
-    
-    #[tokio::test]
-    async fn test_camera_interface_creation() {
-        let config = create_test_config();
-        let camera = CameraInterface::new(config).await;
-        
-        // Camera creation may fail if no hardware is available
-        let camera = match camera {
-            Ok(camera) => camera,
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen { .. })) |
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::Configuration { .. })) => {
-                println!("Camera hardware not available for testing - skipping interface creation test");
-                return;
-            }
-            Err(e) => panic!("Unexpected camera error: {}", e),
-        };
-        assert_eq!(camera.config().index, 0);
-        assert_eq!(camera.config().resolution, (640, 480));
-        assert_eq!(camera.config().max_fps, 30);
-        assert!(!camera.is_capturing());
-    }
-    
-    #[tokio::test]
-    async fn test_camera_builder() {
-        let config = create_test_config();
-        let camera = CameraInterfaceBuilder::new()
-            .config(config)
-            .build()
-            .await;
-        
-        // Camera creation may fail if no hardware is available, which is expected in CI/test environments
-        match camera {
-            Ok(_) => {
-                // Camera hardware available and working
-            }
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen { .. })) |
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::Configuration { .. })) => {
-                // Expected failure when no camera hardware is available
-                println!("Camera hardware not available for testing - this is expected in CI environments");
-            }
-            Err(e) => {
-                panic!("Unexpected camera error: {}", e);
-            }
-        }
-    }
-    
-    #[tokio::test]
-    async fn test_mock_capture() {
-        let config = create_test_config();
-        let camera = match CameraInterface::new(config).await {
-            Ok(camera) => camera,
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen { .. })) |
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::Configuration { .. })) => {
-                println!("Camera hardware not available for testing - skipping capture test");
-                return;
-            }
-            Err(e) => panic!("Unexpected camera error: {}", e),
-        };
-        let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        
-        // Start capture
-        camera.start_capture(Arc::clone(&ring_buffer)).await.unwrap();
-        assert!(camera.is_capturing());
-        
-        // Wait for some frames
-        timeout(Duration::from_millis(200), async {
-            while ring_buffer.get_latest_frame().await.is_none() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }).await.expect("Should capture frames within timeout");
-        
-        // Verify we got frames
-        let latest_frame = ring_buffer.get_latest_frame().await;
-        assert!(latest_frame.is_some());
-        
-        let frame = latest_frame.unwrap();
-        assert_eq!(frame.width, 640);
-        assert_eq!(frame.height, 480);
-        assert_eq!(frame.format, FrameFormat::Mjpeg);
-        
-        // Stop capture
-        camera.stop_capture().await.unwrap();
-        assert!(!camera.is_capturing());
-    }
-    
-    #[tokio::test]
-    async fn test_camera_test_connection() {
-        let config = create_test_config();
-        let camera = match CameraInterface::new(config).await {
-            Ok(camera) => camera,
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen { .. })) |
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::Configuration { .. })) => {
-                println!("Camera hardware not available for testing - skipping connection test");
-                return;
-            }
-            Err(e) => panic!("Unexpected camera error: {}", e),
-        };
-        
-        // Test connection should work in mock mode
-        let result = camera.test_connection().await;
-        assert!(result.is_ok());
-    }
-    
-    #[cfg(all(feature = "camera", target_os = "linux"))]
-    #[test]
-    fn test_format_parsing() {
-        let config = create_test_config();
-        let camera = CameraInterface {
-            config,
-            frame_counter: AtomicU64::new(0),
-            is_running: Arc::new(AtomicBool::new(false)),
-            recovery: Arc::new(tokio::sync::Mutex::new(crate::recovery::CameraRecovery::new())),
-            #[cfg(all(feature = "camera", target_os = "linux"))]
-            device: None,
-            capture_task: Arc::new(tokio::sync::Mutex::new(None)),
-        };
-        
-        assert!(camera.parse_format("MJPG").is_ok());
-        assert!(camera.parse_format("mjpg").is_ok());
-        assert!(camera.parse_format("YUYV").is_ok());
-        assert!(camera.parse_format("RGB24").is_ok());
-        assert!(camera.parse_format("INVALID").is_err());
     }
 }

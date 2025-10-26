@@ -56,8 +56,10 @@ uuid = { version = "1.0", features = ["v4"] }
 tempfile = "3.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Video and image processing (Linux only)
-v4l = { version = "0.14", optional = true }
+# GStreamer for hardware acceleration
+gstreamer = { version = "0.24", optional = true }
+gstreamer-app = { version = "0.24", optional = true }
+gstreamer-video = { version = "0.24", optional = true }
 # Input device handling (Linux only)
 evdev = { version = "0.12", optional = true }
 
@@ -71,7 +73,7 @@ optional = true
 
 [features]
 default = ["camera", "motion_analysis", "streaming", "display"]
-camera = ["dep:v4l"]
+camera = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 motion_analysis = ["dep:image", "dep:imageproc"]
 streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
 display = ["dep:evdev"]
@@ -84,3 +86,10 @@ path = "src/main.rs"
 [[example]]
 name = "display_demo"
 path = "examples/display_demo.rs"
+
+[[example]]
+name = "pi4_camera"
+path = "examples/pi4_camera.rs"
+required-features = ["camera"]
+
+
