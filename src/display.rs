@@ -11,20 +11,41 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-/// Display controller for HyperPixel 4.0 framebuffer interface
+#[cfg(all(feature = "display", target_os = "linux"))]
+use gstreamer::prelude::*;
+#[cfg(all(feature = "display", target_os = "linux"))]
+use gstreamer::Pipeline;
+#[cfg(all(feature = "display", target_os = "linux"))]
+use gstreamer_app::AppSrc;
+
+/// Display controller for HyperPixel 4.0 with GStreamer hardware acceleration
 pub struct DisplayController {
     config: DisplayConfig,
     framebuffer: Arc<RwLock<Option<File>>>,
     backlight: Arc<RwLock<Option<File>>>,
     is_active: Arc<AtomicBool>,
     activation_timer: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    #[cfg(all(feature = "display", target_os = "linux"))]
+    display_pipeline: Arc<RwLock<Option<Pipeline>>>,
+    #[cfg(all(feature = "display", target_os = "linux"))]
+    appsrc: Arc<RwLock<Option<AppSrc>>>,
 }
 
 impl DisplayController {
     /// Create a new display controller
     pub async fn new(config: DisplayConfig) -> Result<Self> {
-        info!("Initializing display controller for HyperPixel 4.0");
+        info!("Initializing GStreamer display controller for HyperPixel 4.0");
         debug!("Display config: {:?}", config);
+
+        #[cfg(all(feature = "display", target_os = "linux"))]
+        {
+            // Initialize GStreamer
+            gstreamer::init().map_err(|e| {
+                DisplayError::Framebuffer {
+                    details: format!("Failed to initialize GStreamer: {}", e),
+                }
+            })?;
+        }
 
         let controller = Self {
             config,
@@ -32,12 +53,80 @@ impl DisplayController {
             backlight: Arc::new(RwLock::new(None)),
             is_active: Arc::new(AtomicBool::new(false)),
             activation_timer: Arc::new(RwLock::new(None)),
+            #[cfg(all(feature = "display", target_os = "linux"))]
+            display_pipeline: Arc::new(RwLock::new(None)),
+            #[cfg(all(feature = "display", target_os = "linux"))]
+            appsrc: Arc::new(RwLock::new(None)),
         };
 
-        // Initialize framebuffer and backlight connections
+        // Initialize display pipeline and devices
+        controller.initialize_display_pipeline().await?;
         controller.initialize_devices().await?;
 
         Ok(controller)
+    }
+
+    /// Initialize GStreamer display pipeline with hardware acceleration
+    #[cfg(all(feature = "display", target_os = "linux"))]
+    async fn initialize_display_pipeline(&self) -> Result<()> {
+        let (width, height) = self.config.resolution;
+        
+        // Build hardware-accelerated display pipeline
+        let pipeline_desc = format!(
+            "appsrc name=src format=time is-live=true caps=image/jpeg ! \
+             jpegdec ! \
+             videoconvert ! \
+             videoscale ! \
+             video/x-raw,format=RGB16,width={},height={} ! \
+             fbdevsink device={} sync=false",
+            width, height, self.config.framebuffer_device
+        );
+
+        info!("Creating GStreamer display pipeline: {}", pipeline_desc);
+
+        let pipeline = gstreamer::parse::launch(&pipeline_desc)
+            .map_err(|e| DisplayError::Framebuffer {
+                details: format!("Failed to create display pipeline: {}", e),
+            })?
+            .downcast::<Pipeline>()
+            .map_err(|_| DisplayError::Framebuffer {
+                details: "Failed to downcast to Pipeline".to_string(),
+            })?;
+
+        // Get the appsrc element
+        let appsrc = pipeline
+            .by_name("src")
+            .ok_or_else(|| DisplayError::Framebuffer {
+                details: "Failed to get appsrc element".to_string(),
+            })?
+            .downcast::<AppSrc>()
+            .map_err(|_| DisplayError::Framebuffer {
+                details: "Failed to downcast to AppSrc".to_string(),
+            })?;
+
+        // Configure appsrc
+        appsrc.set_property("format", gstreamer::Format::Time);
+        appsrc.set_property("is-live", true);
+
+        // Store pipeline and appsrc
+        {
+            let mut pipeline_lock = self.display_pipeline.write().await;
+            *pipeline_lock = Some(pipeline);
+        }
+        {
+            let mut appsrc_lock = self.appsrc.write().await;
+            *appsrc_lock = Some(appsrc);
+        }
+
+        info!("GStreamer display pipeline initialized successfully");
+        Ok(())
+    }
+
+    /// Initialize display pipeline when GStreamer feature is disabled
+    #[cfg(not(all(feature = "display", target_os = "linux")))]
+    async fn initialize_display_pipeline(&self) -> Result<()> {
+        warn!("GStreamer display pipeline is only available on Linux with display feature");
+        Ok(())
     }
 
     /// Initialize framebuffer and backlight device connections
@@ -302,13 +391,101 @@ impl DisplayController {
         Ok(())
     }
 
-    /// Render a frame to the display
+    /// Render a frame to the display using GStreamer hardware acceleration
     pub async fn render_frame(&self, frame: &FrameData) -> Result<()> {
         if !self.is_active.load(Ordering::Relaxed) {
             // Display is not active, skip rendering
             return Ok(());
         }
 
+        #[cfg(all(feature = "display", target_os = "linux"))]
+        {
+            // Use GStreamer pipeline for hardware-accelerated rendering
+            if let Err(e) = self.render_frame_gstreamer(frame).await {
+                warn!("GStreamer rendering failed, falling back to framebuffer: {}", e);
+                self.render_frame_fallback(frame).await?;
+            }
+        }
+
+        #[cfg(not(all(feature = "display", target_os = "linux")))]
+        {
+            // Fallback to direct framebuffer rendering
+            self.render_frame_fallback(frame).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Render frame using GStreamer pipeline
+    #[cfg(all(feature = "display", target_os = "linux"))]
+    async fn render_frame_gstreamer(&self, frame: &FrameData) -> Result<()> {
+        let pipeline_lock = self.display_pipeline.read().await;
+        let appsrc_lock = self.appsrc.read().await;
+
+        if let (Some(pipeline), Some(appsrc)) = (pipeline_lock.as_ref(), appsrc_lock.as_ref()) {
+            // Start pipeline if not already playing
+            if pipeline.current_state() != gstreamer::State::Playing {
+                pipeline.set_state(gstreamer::State::Playing)
+                    .map_err(|e| DisplayError::Framebuffer {
+                        details: format!("Failed to start display pipeline: {}", e),
+                    })?;
+                debug!("Display pipeline started");
+            }
+
+            // Push JPEG frame data to pipeline
+            let jpeg_data = match frame.format {
+                FrameFormat::Mjpeg => {
+                    // Frame is already JPEG, use directly
+                    frame.data.as_ref().clone()
+                }
+                _ => {
+                    // Convert to JPEG first (placeholder - would use actual conversion)
+                    warn!("Non-MJPEG frame format {:?} not yet supported for GStreamer display", frame.format);
+                    return Err(DisplayError::Framebuffer {
+                        details: "Only MJPEG frames supported for GStreamer display".to_string(),
+                    }.into());
+                }
+            };
+
+            // Create GStreamer buffer from JPEG data
+            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len())
+                .map_err(|e| DisplayError::Framebuffer {
+                    details: format!("Failed to create GStreamer buffer: {}", e),
+                })?;
+
+            {
+                let buffer_ref = buffer.get_mut().unwrap();
+                let mut map = buffer_ref.map_writable()
+                    .map_err(|e| DisplayError::Framebuffer {
+                        details: format!("Failed to map buffer: {}", e),
+                    })?;
+                map.copy_from_slice(&jpeg_data);
+            }
+
+            // Set timestamp
+            buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(
+                frame.timestamp.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64
+            ));
+
+            // Push buffer to appsrc
+            appsrc.push_buffer(buffer)
+                .map_err(|e| DisplayError::Framebuffer {
+                    details: format!("Failed to push buffer to display pipeline: {:?}", e),
+                })?;
+
+            debug!("Frame {} rendered via GStreamer pipeline", frame.id);
+            Ok(())
+        } else {
+            Err(DisplayError::Framebuffer {
+                details: "Display pipeline not initialized".to_string(),
+            }.into())
+        }
+    }
+
+    /// Fallback framebuffer rendering (original implementation)
+    async fn render_frame_fallback(&self, frame: &FrameData) -> Result<()> {
         let mut framebuffer = self.framebuffer.write().await;
         
         if let Some(ref mut fb_file) = *framebuffer {
@@ -331,7 +508,7 @@ impl DisplayController {
                     details: format!("Failed to flush framebuffer: {}", e) 
                 })?;
             
-            debug!("Frame {} rendered to display", frame.id);
+            debug!("Frame {} rendered to framebuffer (fallback)", frame.id);
         } else {
             // Try to reinitialize framebuffer
             match self.open_framebuffer().await {
@@ -359,7 +536,7 @@ impl DisplayController {
                                 details: format!("Failed to flush framebuffer: {}", e) 
                             })?;
                         
-                        debug!("Frame {} rendered to display", frame.id);
+                        debug!("Frame {} rendered to framebuffer (fallback retry)", frame.id);
                     }
                 }
                 Err(e) => {
@@ -454,6 +631,10 @@ impl DisplayController {
             backlight: Arc::clone(&self.backlight),
             is_active: Arc::clone(&self.is_active),
             activation_timer: Arc::clone(&self.activation_timer),
+            #[cfg(all(feature = "display", target_os = "linux"))]
+            display_pipeline: Arc::clone(&self.display_pipeline),
+            #[cfg(all(feature = "display", target_os = "linux"))]
+            appsrc: Arc::clone(&self.appsrc),
         }
     }
 }

@@ -7,7 +7,14 @@ use crate::error::Result;
 #[cfg(feature = "motion_analysis")]
 use crate::error::AnalyzerError;
 
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+use gstreamer::prelude::*;
+#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+use gstreamer::Pipeline;
+#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+use gstreamer_app::{AppSrc, AppSink};
 
 #[cfg(feature = "motion_analysis")]
 use image::{ImageBuffer, Luma, RgbImage, GrayImage};
@@ -27,7 +34,7 @@ struct SimpleMotionState {
     last_motion_time: Option<std::time::SystemTime>,
 }
 
-/// Motion detection analyzer using imageproc background subtraction
+/// Motion detection analyzer with GStreamer preprocessing and imageproc analysis
 pub struct MotionAnalyzer {
     config: AnalyzerConfig,
     #[cfg(feature = "motion_analysis")]
@@ -36,22 +43,51 @@ pub struct MotionAnalyzer {
     frame_count: u64,
     #[cfg(not(feature = "motion_analysis"))]
     simple_state: SimpleMotionState,
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    preprocessing_pipeline: Option<Pipeline>,
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    appsrc: Option<AppSrc>,
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    appsink: Option<AppSink>,
 }
 
 impl MotionAnalyzer {
     /// Create a new motion analyzer with the given configuration
     pub async fn new(config: AnalyzerConfig) -> Result<Self> {
-        info!("Initializing motion analyzer with config: {:?}", config);
+        info!("Initializing GStreamer-enhanced motion analyzer with config: {:?}", config);
         
         #[cfg(feature = "motion_analysis")]
         {
-            info!("Imageproc motion analyzer initialized successfully");
-            
-            Ok(Self {
+            #[cfg(target_os = "linux")]
+            {
+                // Initialize GStreamer for preprocessing
+                if let Err(e) = gstreamer::init() {
+                    warn!("Failed to initialize GStreamer for motion analysis: {}", e);
+                }
+            }
+
+            let mut analyzer = Self {
                 config,
                 background_model: None,
                 frame_count: 0,
-            })
+                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+                preprocessing_pipeline: None,
+                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+                appsrc: None,
+                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+                appsink: None,
+            };
+
+            #[cfg(target_os = "linux")]
+            {
+                if let Err(e) = analyzer.initialize_preprocessing_pipeline().await {
+                    warn!("Failed to initialize GStreamer preprocessing pipeline: {}", e);
+                    info!("Falling back to direct image processing");
+                }
+            }
+
+            info!("Motion analyzer initialized successfully");
+            Ok(analyzer)
         }
         
         #[cfg(not(feature = "motion_analysis"))]
@@ -65,6 +101,68 @@ impl MotionAnalyzer {
                 },
             })
         }
+    }
+
+    /// Initialize GStreamer preprocessing pipeline for motion analysis
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    async fn initialize_preprocessing_pipeline(&mut self) -> Result<()> {
+        // Create pipeline for JPEG -> grayscale conversion with optional scaling
+        let pipeline_desc = format!(
+            "appsrc name=src format=time is-live=true caps=image/jpeg ! \
+             jpegdec ! \
+             videoconvert ! \
+             videoscale ! \
+             video/x-raw,format=GRAY8,width=320,height=240 ! \
+             appsink name=sink sync=false max-buffers=1 drop=true"
+        );
+
+        debug!("Creating motion analysis preprocessing pipeline: {}", pipeline_desc);
+
+        let pipeline = gstreamer::parse::launch(&pipeline_desc)
+            .map_err(|e| AnalyzerError::FrameProcessing {
+                details: format!("Failed to create preprocessing pipeline: {}", e),
+            })?
+            .downcast::<Pipeline>()
+            .map_err(|_| AnalyzerError::FrameProcessing {
+                details: "Failed to downcast to Pipeline".to_string(),
+            })?;
+
+        let appsrc = pipeline
+            .by_name("src")
+            .ok_or_else(|| AnalyzerError::FrameProcessing {
+                details: "Failed to get appsrc element".to_string(),
+            })?
+            .downcast::<AppSrc>()
+            .map_err(|_| AnalyzerError::FrameProcessing {
+                details: "Failed to downcast to AppSrc".to_string(),
+            })?;
+
+        let appsink = pipeline
+            .by_name("sink")
+            .ok_or_else(|| AnalyzerError::FrameProcessing {
+                details: "Failed to get appsink element".to_string(),
+            })?
+            .downcast::<AppSink>()
+            .map_err(|_| AnalyzerError::FrameProcessing {
+                details: "Failed to downcast to AppSink".to_string(),
+            })?;
+
+        // Configure elements
+        appsrc.set_property("format", gstreamer::Format::Time);
+        appsrc.set_property("is-live", true);
+
+        // Start pipeline
+        pipeline.set_state(gstreamer::State::Playing)
+            .map_err(|e| AnalyzerError::FrameProcessing {
+                details: format!("Failed to start preprocessing pipeline: {}", e),
+            })?;
+
+        self.preprocessing_pipeline = Some(pipeline);
+        self.appsrc = Some(appsrc);
+        self.appsink = Some(appsink);
+
+        info!("GStreamer preprocessing pipeline initialized for motion analysis");
+        Ok(())
     }
     
     /// Analyze a single frame for motion (async wrapper)
@@ -180,9 +278,22 @@ impl MotionAnalyzer {
         }
     }
     
-    /// Convert frame data to grayscale image
+    /// Convert frame data to grayscale image using GStreamer preprocessing when available
     #[cfg(feature = "motion_analysis")]
     fn frame_to_gray_image(&self, frame: &FrameData) -> Result<GrayImage> {
+        #[cfg(target_os = "linux")]
+        {
+            // Try GStreamer preprocessing first for MJPEG frames
+            if frame.format == FrameFormat::Mjpeg && self.preprocessing_pipeline.is_some() {
+                if let Ok(gray_image) = self.frame_to_gray_gstreamer(frame) {
+                    return Ok(gray_image);
+                } else {
+                    debug!("GStreamer preprocessing failed, falling back to direct processing");
+                }
+            }
+        }
+
+        // Fallback to direct processing
         match frame.format {
             FrameFormat::Mjpeg => {
                 // Decode MJPEG data
@@ -201,6 +312,68 @@ impl MotionAnalyzer {
                 self.rgb24_to_gray(frame)
             }
         }
+    }
+
+    /// Convert MJPEG frame to grayscale using GStreamer preprocessing
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    fn frame_to_gray_gstreamer(&self, frame: &FrameData) -> Result<GrayImage> {
+        if let (Some(appsrc), Some(appsink)) = (&self.appsrc, &self.appsink) {
+            // Create GStreamer buffer from JPEG data
+            let mut buffer = gstreamer::Buffer::with_size(frame.data.len())
+                .map_err(|e| AnalyzerError::FrameProcessing {
+                    details: format!("Failed to create GStreamer buffer: {}", e),
+                })?;
+
+            {
+                let buffer_ref = buffer.get_mut().unwrap();
+                let mut map = buffer_ref.map_writable()
+                    .map_err(|e| AnalyzerError::FrameProcessing {
+                        details: format!("Failed to map buffer: {}", e),
+                    })?;
+                map.copy_from_slice(frame.data.as_ref());
+            }
+
+            // Set timestamp
+            buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(
+                frame.timestamp.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64
+            ));
+
+            // Push buffer to pipeline
+            appsrc.push_buffer(buffer)
+                .map_err(|e| AnalyzerError::FrameProcessing {
+                    details: format!("Failed to push buffer to preprocessing pipeline: {:?}", e),
+                })?;
+
+            // Pull processed sample
+            if let Ok(sample) = appsink.pull_sample() {
+                let buffer = sample.buffer().ok_or_else(|| {
+                    AnalyzerError::FrameProcessing {
+                        details: "No buffer in processed sample".to_string(),
+                    }
+                })?;
+
+                let map = buffer.map_readable().map_err(|e| {
+                    AnalyzerError::FrameProcessing {
+                        details: format!("Failed to map processed buffer: {}", e),
+                    }
+                })?;
+
+                // Create grayscale image from processed data (320x240 GRAY8)
+                let gray_image = GrayImage::from_raw(320, 240, map.as_slice().to_vec())
+                    .ok_or_else(|| AnalyzerError::FrameProcessing {
+                        details: "Failed to create grayscale image from processed data".to_string(),
+                    })?;
+
+                debug!("Successfully preprocessed frame {} using GStreamer (320x240)", frame.id);
+                return Ok(gray_image);
+            }
+        }
+
+        Err(AnalyzerError::FrameProcessing {
+            details: "GStreamer preprocessing not available".to_string(),
+        }.into())
     }
     
     /// Convert YUYV frame to grayscale

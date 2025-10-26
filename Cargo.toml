@@ -72,24 +72,18 @@ version = "0.23"
 optional = true
 
 [features]
-default = ["camera", "motion_analysis", "streaming", "display"]
+default = ["camera", "motion_analysis", "streaming", "display", "video_encoding"]
 camera = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
-motion_analysis = ["dep:image", "dep:imageproc"]
+motion_analysis = ["dep:image", "dep:imageproc", "dep:gstreamer", "dep:gstreamer-app"]
 streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
-display = ["dep:evdev"]
+display = ["dep:evdev", "dep:gstreamer", "dep:gstreamer-app"]
+video_encoding = ["dep:gstreamer", "dep:gstreamer-app"]
 
 [[bin]]
 name = "doorcam"
 path = "src/main.rs"
 
 
-[[example]]
-name = "display_demo"
-path = "examples/display_demo.rs"
 
-[[example]]
-name = "pi4_camera"
-path = "examples/pi4_camera.rs"
-required-features = ["camera"]
 
 

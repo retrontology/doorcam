@@ -15,6 +15,13 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+use gstreamer::prelude::*;
+#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+use gstreamer::Pipeline;
+#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+use gstreamer_app::AppSrc;
+
 /// Video capture system for motion-triggered recording
 pub struct VideoCapture {
     config: CaptureConfig,
@@ -310,34 +317,150 @@ impl VideoCapture {
         Ok(Arc::new(jpeg_data.to_vec()))
     }
 
-    /// Create video file from frames using hardware acceleration if available
+    /// Create video file from frames using GStreamer hardware acceleration
     async fn create_video_file(&self, frames: &[&FrameData], capture_dir: &PathBuf, event_id: &str) -> Result<()> {
         let video_filename = format!("{}.mp4", event_id);
         let video_path = capture_dir.join(video_filename);
 
-        info!("Creating video file: {}", video_path.display());
+        info!("Creating video file with {} frames: {}", frames.len(), video_path.display());
 
-        // For now, we'll create a simple implementation
-        // In a full implementation, this would use FFmpeg or hardware encoding
-        
+        #[cfg(all(feature = "video_encoding", target_os = "linux"))]
+        {
+            if let Err(e) = self.create_video_gstreamer(frames, &video_path).await {
+                warn!("GStreamer video encoding failed, using fallback: {}", e);
+                self.create_video_fallback(frames, &video_path, event_id).await?;
+            }
+        }
+
+        #[cfg(not(all(feature = "video_encoding", target_os = "linux")))]
+        {
+            self.create_video_fallback(frames, &video_path, event_id).await?;
+        }
+
+        info!("Video file created: {}", video_path.display());
+        Ok(())
+    }
+
+    /// Create video using GStreamer hardware-accelerated encoding
+    #[cfg(all(feature = "video_encoding", target_os = "linux"))]
+    async fn create_video_gstreamer(&self, frames: &[&FrameData], video_path: &PathBuf) -> Result<()> {
+        // Initialize GStreamer if not already done
+        gstreamer::init().map_err(|e| {
+            DoorcamError::component("video_capture", &format!("Failed to initialize GStreamer: {}", e))
+        })?;
+
+        // Build hardware-accelerated encoding pipeline
+        let pipeline_desc = format!(
+            "appsrc name=src format=time is-live=false caps=image/jpeg,framerate=30/1 ! \
+             jpegdec ! \
+             videoconvert ! \
+             video/x-raw,format=I420 ! \
+             v4l2h264enc extra-controls=\"encode,h264_profile=4,h264_level=10,video_bitrate=2000000\" ! \
+             h264parse ! \
+             mp4mux ! \
+             filesink location={}",
+            video_path.to_string_lossy()
+        );
+
+        debug!("Creating GStreamer video encoding pipeline: {}", pipeline_desc);
+
+        let pipeline = gstreamer::parse::launch(&pipeline_desc)
+            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create video pipeline: {}", e)))?
+            .downcast::<Pipeline>()
+            .map_err(|_| DoorcamError::component("video_capture", "Failed to downcast to Pipeline"))?;
+
+        let appsrc = pipeline
+            .by_name("src")
+            .ok_or_else(|| DoorcamError::component("video_capture", "Failed to get appsrc element"))?
+            .downcast::<AppSrc>()
+            .map_err(|_| DoorcamError::component("video_capture", "Failed to downcast to AppSrc"))?;
+
+        // Configure appsrc
+        appsrc.set_property("format", gstreamer::Format::Time);
+        appsrc.set_property("is-live", false);
+
+        // Start pipeline
+        pipeline.set_state(gstreamer::State::Playing)
+            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to start video pipeline: {}", e)))?;
+
+        info!("Started GStreamer video encoding pipeline");
+
+        // Push all frames to the pipeline
+        let frame_duration = gstreamer::ClockTime::from_nseconds(1_000_000_000 / 30); // 30 FPS
+        for (index, frame) in frames.iter().enumerate() {
+            // Only process MJPEG frames for now
+            if frame.format != crate::frame::FrameFormat::Mjpeg {
+                warn!("Skipping non-MJPEG frame {} in video encoding", frame.id);
+                continue;
+            }
+
+            // Create GStreamer buffer
+            let mut buffer = gstreamer::Buffer::with_size(frame.data.len())
+                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create buffer: {}", e)))?;
+
+            {
+                let buffer_ref = buffer.get_mut().unwrap();
+                let mut map = buffer_ref.map_writable()
+                    .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to map buffer: {}", e)))?;
+                map.copy_from_slice(frame.data.as_ref());
+            }
+
+            // Set timestamp and duration
+            let timestamp = gstreamer::ClockTime::from_nseconds((index as u64) * frame_duration.nseconds());
+            buffer.get_mut().unwrap().set_pts(timestamp);
+            buffer.get_mut().unwrap().set_duration(frame_duration);
+
+            // Push buffer
+            appsrc.push_buffer(buffer)
+                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to push buffer: {:?}", e)))?;
+
+            if index % 30 == 0 {
+                debug!("Encoded {} frames to video", index + 1);
+            }
+        }
+
+        // Signal end of stream
+        appsrc.end_of_stream()
+            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to signal EOS: {:?}", e)))?;
+
+        // Wait for pipeline to finish
+        let bus = pipeline.bus().unwrap();
+        for msg in bus.iter_timed(gstreamer::ClockTime::from_seconds(30)) {
+            match msg.view() {
+                gstreamer::MessageView::Eos(..) => {
+                    info!("Video encoding completed successfully");
+                    break;
+                }
+                gstreamer::MessageView::Error(err) => {
+                    let error_msg = format!("Video encoding error: {} ({})", err.error(), err.debug().unwrap_or_default());
+                    return Err(DoorcamError::component("video_capture", &error_msg));
+                }
+                _ => {}
+            }
+        }
+
+        // Stop pipeline
+        pipeline.set_state(gstreamer::State::Null)
+            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to stop pipeline: {}", e)))?;
+
+        info!("GStreamer video encoding completed: {} frames", frames.len());
+        Ok(())
+    }
+
+    /// Fallback video creation (placeholder implementation)
+    async fn create_video_fallback(&self, frames: &[&FrameData], video_path: &PathBuf, event_id: &str) -> Result<()> {
         // Create a placeholder video file for now
         let video_info = format!(
-            "Video file for capture {}\nFrames: {}\nCreated: {:?}\n",
+            "Video file for capture {}\nFrames: {}\nCreated: {:?}\nNote: GStreamer hardware encoding not available\n",
             event_id,
             frames.len(),
             SystemTime::now()
         );
 
-        fs::write(&video_path, video_info).await
+        fs::write(video_path, video_info).await
             .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create video file: {}", e)))?;
 
-        // TODO: Implement actual video encoding
-        // This would involve:
-        // 1. Setting up FFmpeg or hardware encoder (h264_v4l2m2m)
-        // 2. Processing frames through the encoder
-        // 3. Writing the encoded video stream to file
-
-        info!("Video file created: {}", video_path.display());
+        info!("Created placeholder video file (fallback mode)");
         Ok(())
     }
 
