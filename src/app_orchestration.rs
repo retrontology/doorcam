@@ -596,6 +596,7 @@ mod tests {
                 backlight_device: "/sys/class/backlight/rpi_backlight".to_string(),
                 touch_device: "/dev/input/event0".to_string(),
                 activation_period_seconds: 30,
+                resolution: (800, 480),
                 rotation: None,
             },
         }

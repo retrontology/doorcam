@@ -427,6 +427,7 @@ mod tests {
             backlight_device: "/tmp/test_backlight".to_string(),
             touch_device: "/tmp/test_touch".to_string(),
             activation_period_seconds: 5,
+            resolution: (800, 480),
             rotation: None,
         }
     }

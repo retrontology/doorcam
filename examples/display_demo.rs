@@ -26,6 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backlight_device: "/tmp/demo_backlight".to_string(),
         touch_device: "/tmp/demo_touch".to_string(),
         activation_period_seconds: 10,
+        resolution: (800, 480),
         rotation: None,
     };
 

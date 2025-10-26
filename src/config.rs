@@ -110,6 +110,10 @@ pub struct DisplayConfig {
     #[serde(default = "default_activation_period")]
     pub activation_period_seconds: u32,
     
+    /// Display resolution (width, height)
+    #[serde(default = "default_display_resolution")]
+    pub resolution: (u32, u32),
+    
     /// Display rotation
     pub rotation: Option<Rotation>,
 }
@@ -172,6 +176,7 @@ impl DoorcamConfig {
             .set_default("display.backlight_device", default_backlight_device())?
             .set_default("display.touch_device", default_touch_device())?
             .set_default("display.activation_period_seconds", default_activation_period())?
+            .set_default("display.resolution", vec![default_display_resolution().0, default_display_resolution().1])?
             .set_default("system.trim_old", default_trim_old())?
             .set_default("system.retention_days", default_retention_days())?
             .set_default("system.ring_buffer_capacity", default_ring_buffer_capacity() as i64)?
@@ -243,6 +248,7 @@ fn default_framebuffer_device() -> String { "/dev/fb0".to_string() }
 fn default_backlight_device() -> String { "/sys/class/backlight/rpi_backlight/brightness".to_string() }
 fn default_touch_device() -> String { "/dev/input/event0".to_string() }
 fn default_activation_period() -> u32 { 30 }
+fn default_display_resolution() -> (u32, u32) { (800, 480) }
 
 fn default_trim_old() -> bool { true }
 fn default_retention_days() -> u32 { 7 }
@@ -286,6 +292,7 @@ mod tests {
                 backlight_device: default_backlight_device(),
                 touch_device: default_touch_device(),
                 activation_period_seconds: default_activation_period(),
+                resolution: default_display_resolution(),
                 rotation: None,
             },
             system: SystemConfig {
@@ -346,6 +353,7 @@ mod tests {
                 backlight_device: "/sys/class/backlight/rpi_backlight/brightness".to_string(),
                 touch_device: "/dev/input/event0".to_string(),
                 activation_period_seconds: 30,
+                resolution: (800, 480),
                 rotation: None,
             },
             system: SystemConfig {

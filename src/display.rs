@@ -373,42 +373,57 @@ impl DisplayController {
 
     /// Convert frame data to display format (RGB565 for HyperPixel 4.0)
     async fn convert_frame_for_display(&self, frame: &FrameData) -> Result<Vec<u8>> {
-        // For now, implement a basic conversion placeholder
-        // TODO: Implement proper format conversion and rotation in later tasks
+        // Use configured display resolution to prevent "File too large" errors
+        let display_width = self.config.resolution.0;
+        let display_height = self.config.resolution.1;
+        
+        debug!("Converting frame {}x{} to display {}x{}", 
+               frame.width, frame.height, display_width, display_height);
         
         match frame.format {
             FrameFormat::Mjpeg => {
                 // For MJPEG, we would need to decode first, then convert to RGB565
-                // For now, return a placeholder pattern
+                // For now, return a placeholder pattern at display resolution
                 debug!("MJPEG frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(frame.width, frame.height).await
+                self.create_placeholder_display_data(display_width, display_height).await
             }
             FrameFormat::Yuyv => {
-                // Convert YUYV to RGB565
+                // Convert YUYV to RGB565 at display resolution
                 debug!("YUYV frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(frame.width, frame.height).await
+                self.create_placeholder_display_data(display_width, display_height).await
             }
             FrameFormat::Rgb24 => {
-                // Convert RGB24 to RGB565
+                // Convert RGB24 to RGB565 at display resolution
                 debug!("RGB24 frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(frame.width, frame.height).await
+                self.create_placeholder_display_data(display_width, display_height).await
             }
         }
     }
 
     /// Create placeholder display data for testing
     async fn create_placeholder_display_data(&self, width: u32, height: u32) -> Result<Vec<u8>> {
-        // Create a simple pattern for testing - RGB565 format (2 bytes per pixel)
-        let pixel_count = (width * height) as usize;
+        // Ensure we use the configured display resolution to prevent buffer overruns
+        let display_width = self.config.resolution.0;
+        let display_height = self.config.resolution.1;
+        
+        // Use the smaller of requested size or display size to prevent "File too large" errors
+        let actual_width = width.min(display_width);
+        let actual_height = height.min(display_height);
+        
+        debug!("Creating display data for {}x{} (requested {}x{}, display {}x{})", 
+               actual_width, actual_height, width, height, display_width, display_height);
+        
+        // Create RGB565 format data (2 bytes per pixel)
+        let pixel_count = (actual_width * actual_height) as usize;
         let mut data = Vec::with_capacity(pixel_count * 2);
         
         // Create a simple gradient pattern
-        for y in 0..height {
-            for x in 0..width {
+        for y in 0..actual_height {
+            for x in 0..actual_width {
                 // Create RGB565 pixel (5 bits red, 6 bits green, 5 bits blue)
-                let r = ((x * 31) / width) as u16;  // 5 bits
-                let g = ((y * 63) / height) as u16; // 6 bits
-                let b = (((x + y) * 31) / (width + height)) as u16; // 5 bits
+                let r = ((x * 31) / actual_width) as u16;  // 5 bits
+                let g = ((y * 63) / actual_height) as u16; // 6 bits
+                let b = (((x + y) * 31) / (actual_width + actual_height)) as u16; // 5 bits
                 
                 let rgb565 = (r << 11) | (g << 5) | b;
                 
@@ -455,7 +470,7 @@ impl Clone for DisplayController {
 pub struct DisplayConverter;
 
 impl DisplayConverter {
-    /// Convert RGB24 to RGB565 format
+    /// Convert RGB24 to RGB565 format with optional scaling
     pub fn rgb24_to_rgb565(rgb24_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         let expected_size = (width * height * 3) as usize;
         if rgb24_data.len() != expected_size {
@@ -479,6 +494,80 @@ impl DisplayConverter {
         }
         
         Ok(rgb565_data)
+    }
+
+    /// Scale RGB565 data to target resolution using simple nearest neighbor
+    pub fn scale_rgb565(
+        data: &[u8], 
+        src_width: u32, 
+        src_height: u32, 
+        dst_width: u32, 
+        dst_height: u32
+    ) -> Result<Vec<u8>> {
+        if data.len() != (src_width * src_height * 2) as usize {
+            return Err(DisplayError::FormatConversion { 
+                details: format!("Invalid RGB565 data size: expected {}, got {}", 
+                               src_width * src_height * 2, data.len()) 
+            }.into());
+        }
+
+        let mut scaled_data = Vec::with_capacity((dst_width * dst_height * 2) as usize);
+        
+        let x_ratio = src_width as f32 / dst_width as f32;
+        let y_ratio = src_height as f32 / dst_height as f32;
+        
+        for dst_y in 0..dst_height {
+            for dst_x in 0..dst_width {
+                let src_x = ((dst_x as f32) * x_ratio) as u32;
+                let src_y = ((dst_y as f32) * y_ratio) as u32;
+                
+                // Ensure we don't go out of bounds
+                let src_x = src_x.min(src_width - 1);
+                let src_y = src_y.min(src_height - 1);
+                
+                let src_index = ((src_y * src_width + src_x) * 2) as usize;
+                
+                // Copy the RGB565 pixel (2 bytes)
+                scaled_data.push(data[src_index]);
+                scaled_data.push(data[src_index + 1]);
+            }
+        }
+        
+        Ok(scaled_data)
+    }
+
+    /// Crop RGB565 data to fit within target dimensions (center crop)
+    pub fn crop_rgb565(
+        data: &[u8], 
+        src_width: u32, 
+        src_height: u32, 
+        dst_width: u32, 
+        dst_height: u32
+    ) -> Result<Vec<u8>> {
+        if data.len() != (src_width * src_height * 2) as usize {
+            return Err(DisplayError::FormatConversion { 
+                details: format!("Invalid RGB565 data size: expected {}, got {}", 
+                               src_width * src_height * 2, data.len()) 
+            }.into());
+        }
+
+        // Calculate crop offsets (center crop)
+        let crop_width = dst_width.min(src_width);
+        let crop_height = dst_height.min(src_height);
+        let offset_x = (src_width - crop_width) / 2;
+        let offset_y = (src_height - crop_height) / 2;
+        
+        let mut cropped_data = Vec::with_capacity((crop_width * crop_height * 2) as usize);
+        
+        for y in 0..crop_height {
+            let src_y = offset_y + y;
+            let src_row_start = (src_y * src_width + offset_x) as usize * 2;
+            let src_row_end = src_row_start + (crop_width as usize * 2);
+            
+            cropped_data.extend_from_slice(&data[src_row_start..src_row_end]);
+        }
+        
+        Ok(cropped_data)
     }
 
     /// Apply rotation to display data (placeholder for future implementation)
@@ -507,6 +596,7 @@ mod tests {
             backlight_device: "/tmp/test_backlight".to_string(),
             touch_device: "/tmp/test_touch".to_string(),
             activation_period_seconds: 5,
+            resolution: (800, 480),
             rotation: None,
         }
     }
@@ -590,7 +680,36 @@ mod tests {
         
         let display_data = controller.convert_frame_for_display(&frame).await.unwrap();
         
-        // Should produce RGB565 data
-        assert_eq!(display_data.len(), 320 * 240 * 2);
+        // Should produce RGB565 data at display resolution (800x480)
+        assert_eq!(display_data.len(), 800 * 480 * 2);
+    }
+
+    #[test]
+    fn test_rgb565_scaling() {
+        // Create test RGB565 data (2x2 pixels)
+        let src_data = vec![
+            0x00, 0xF8, // Red pixel
+            0xE0, 0x07, // Green pixel  
+            0x1F, 0x00, // Blue pixel
+            0xFF, 0xFF, // White pixel
+        ];
+        
+        // Scale to 4x4
+        let scaled_data = DisplayConverter::scale_rgb565(&src_data, 2, 2, 4, 4).unwrap();
+        
+        // Should be 4x4 pixels = 32 bytes
+        assert_eq!(scaled_data.len(), 32);
+    }
+
+    #[test]
+    fn test_rgb565_cropping() {
+        // Create test RGB565 data (4x4 pixels)
+        let src_data = vec![0u8; 4 * 4 * 2]; // 32 bytes
+        
+        // Crop to 2x2 (center crop)
+        let cropped_data = DisplayConverter::crop_rgb565(&src_data, 4, 4, 2, 2).unwrap();
+        
+        // Should be 2x2 pixels = 8 bytes
+        assert_eq!(cropped_data.len(), 8);
     }
 }

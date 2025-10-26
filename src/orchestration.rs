@@ -88,12 +88,11 @@ mod tests {
             #[cfg(feature = "display")]
             display: crate::config::DisplayConfig {
                 framebuffer_device: "/dev/fb0".to_string(),
-                backlight_device: "/sys/class/backlight/rpi_backlight".to_string(),
-                width: 800,
-                height: 480,
+                backlight_device: "/sys/class/backlight/rpi_backlight/brightness".to_string(),
+                touch_device: "/dev/input/event0".to_string(),
+                activation_period_seconds: 30,
+                resolution: (800, 480),
                 rotation: None,
-                brightness: 80,
-                timeout_seconds: 30,
             },
         }
     }
