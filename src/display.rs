@@ -84,8 +84,26 @@ impl DisplayController {
             }
         };
         
-        // Build hardware-accelerated display pipeline - downsize BEFORE rotation for better performance
-        let mut pipeline_desc = String::from("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec");
+        // Map decode scale to jpegdec idct-method (same as analyzer)
+        let idct_method = match self.config.jpeg_decode_scale {
+            1 => 0,  // Full resolution
+            2 => 1,  // 1/2 resolution
+            4 => 4,  // 1/4 resolution (recommended for display efficiency)
+            8 => 2,  // 1/8 resolution
+            _ => {
+                warn!("Invalid display jpeg_decode_scale {}, using 1/4 resolution", self.config.jpeg_decode_scale);
+                4
+            }
+        };
+
+        info!("Using display JPEG decode scale 1/{} (idct-method={})", self.config.jpeg_decode_scale, idct_method);
+
+        // Build hardware-accelerated display pipeline with efficient JPEG decoding
+        // idct-method enables partial JPEG decoding at DCT level for better performance:
+        // - Reduces memory bandwidth and CPU usage
+        // - Maintains good visual quality for display purposes
+        // - Similar to OpenCV's IMREAD_REDUCED_* flags
+        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec idct-method={}", idct_method);
         
         // First downsize to pre-rotation dimensions
         pipeline_desc.push_str(&format!(
@@ -819,6 +837,7 @@ mod tests {
             activation_period_seconds: 5,
             resolution: (800, 480),
             rotation: None,
+            jpeg_decode_scale: 4,
         }
     }
 

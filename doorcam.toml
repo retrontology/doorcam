@@ -21,13 +21,21 @@ format = "MJPG"
 
 [analyzer]
 # Maximum FPS for motion analysis (lower = less CPU usage)
-max_fps = 5
+max_fps = 1
 
 # Delta threshold for background subtraction (higher = less sensitive)
 delta_threshold = 25
 
 # Minimum contour area to trigger motion detection (pixels)
 contour_minimum_area = 1000.0
+
+# Enable hardware acceleration for GStreamer pipeline (V4L2 on Raspberry Pi)
+hardware_acceleration = true
+
+# JPEG decoding resolution scale for motion analysis efficiency
+# 1 = full resolution, 2 = 1/2 resolution, 4 = 1/4 resolution (recommended), 8 = 1/8 resolution
+# Lower resolution = faster processing but less detail for motion detection
+jpeg_decode_scale = 4
 
 [capture]
 # Preroll duration in seconds (how much video before motion to save)
@@ -70,6 +78,11 @@ activation_period_seconds = 30
 
 # Optional display rotation - uncomment to enable
 # rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+# JPEG decoding resolution scale for display efficiency
+# 1 = full resolution, 2 = 1/2 resolution, 4 = 1/4 resolution (recommended), 8 = 1/8 resolution
+# Lower resolution = faster decoding and rendering but less detail
+jpeg_decode_scale = 4
 
 [system]
 # Enable automatic cleanup of old capture events

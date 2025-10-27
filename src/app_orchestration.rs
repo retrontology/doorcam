@@ -572,6 +572,7 @@ mod tests {
                 max_fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
+                hardware_acceleration: true,
             },
             capture: crate::config::CaptureConfig {
                 preroll_seconds: 5,

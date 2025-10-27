@@ -18,6 +18,7 @@ pub struct MotionAnalyzerIntegration {
     analysis_task: Option<JoinHandle<()>>,
     event_handler_task: Option<JoinHandle<()>>,
     is_running: Arc<tokio::sync::RwLock<bool>>,
+    last_analysis_time: Arc<tokio::sync::RwLock<std::time::Instant>>,
 }
 
 impl MotionAnalyzerIntegration {
@@ -38,6 +39,7 @@ impl MotionAnalyzerIntegration {
             analysis_task: None,
             event_handler_task: None,
             is_running: Arc::new(tokio::sync::RwLock::new(false)),
+            last_analysis_time: Arc::new(tokio::sync::RwLock::new(std::time::Instant::now())),
         })
     }
     
@@ -56,9 +58,12 @@ impl MotionAnalyzerIntegration {
         let ring_buffer = Arc::clone(&self.ring_buffer);
         let event_bus = Arc::clone(&self.event_bus);
         let is_running_clone = Arc::clone(&self.is_running);
+        let last_analysis_time = Arc::clone(&self.last_analysis_time);
         
         let analysis_task = tokio::spawn(async move {
             info!("Motion analysis task started");
+            
+            let mut last_frame_id = 0u64;
             
             loop {
                 // Check if we should continue running
@@ -70,87 +75,89 @@ impl MotionAnalyzerIntegration {
                     }
                 }
                 
-                // Run the analysis loop
+                // Get current configuration
                 let config = {
                     let analyzer_guard = analyzer.read().await;
                     analyzer_guard.config().clone()
                 };
                 
-                let mut interval = tokio::time::interval(
-                    tokio::time::Duration::from_millis(1000 / config.max_fps as u64)
-                );
-                let mut last_frame_id = 0u64;
+                // Calculate frame interval based on max_fps
+                let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
                 
-                loop {
-                    // Check if we should continue running
-                    {
-                        let running = is_running_clone.read().await;
-                        if !*running {
-                            break;
-                        }
-                    }
-                    
-                    // Use timeout for interval tick to allow for faster shutdown
-                    match tokio::time::timeout(
-                        tokio::time::Duration::from_millis(100),
-                        interval.tick()
-                    ).await {
-                        Ok(_) => {}, // Normal tick
-                        Err(_) => continue, // Timeout, check shutdown flag again
-                    }
-                    
-                    // Check shutdown flag again after tick
-                    {
-                        let running = is_running_clone.read().await;
-                        if !*running {
-                            break;
-                        }
-                    }
-                    
+                // Check if enough time has passed since last analysis
+                let should_analyze = {
+                    let last_time = last_analysis_time.read().await;
+                    last_time.elapsed() >= frame_interval
+                };
+                
+                if should_analyze {
                     // Get the latest frame from the ring buffer
                     if let Some(frame) = ring_buffer.get_latest_frame().await {
                         // Skip if we've already analyzed this frame
-                        if frame.id <= last_frame_id {
-                            continue;
-                        }
-                        
-                        last_frame_id = frame.id;
-                        
-                        // Analyze the frame with timeout to prevent blocking shutdown
-                        let analysis_result = tokio::time::timeout(
-                            tokio::time::Duration::from_millis(500),
-                            async {
-                                let mut analyzer_guard = analyzer.write().await;
-                                analyzer_guard.analyze_frame(&frame, &event_bus).await
+                        if frame.id > last_frame_id {
+                            last_frame_id = frame.id;
+                            
+                            // Update last analysis time
+                            {
+                                let mut last_time = last_analysis_time.write().await;
+                                *last_time = std::time::Instant::now();
                             }
-                        ).await;
-                        
-                        match analysis_result {
-                            Ok(Ok(Some(motion_area))) => {
-                                debug!("Motion detected with area: {:.2}", motion_area);
-                            }
-                            Ok(Ok(None)) => {
-                                debug!("No motion detected in frame {}", frame.id);
-                            }
-                            Ok(Err(e)) => {
-                                error!("Motion analysis error: {}", e);
-                                
-                                // Publish system error event
-                                if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
-                                    component: "motion_analyzer_integration".to_string(),
-                                    error: e.to_string(),
-                                }).await {
-                                    error!("Failed to publish motion analysis error event: {}", publish_err);
+                            
+                            debug!("Analyzing frame {} (fps limit: {})", frame.id, config.max_fps);
+                            
+                            // Analyze the frame with timeout to prevent blocking shutdown
+                            let analysis_result = tokio::time::timeout(
+                                tokio::time::Duration::from_millis(2000), // Increased timeout for hardware decoding
+                                async {
+                                    let mut analyzer_guard = analyzer.write().await;
+                                    analyzer_guard.analyze_frame(&frame, &event_bus).await
+                                }
+                            ).await;
+                            
+                            match analysis_result {
+                                Ok(Ok(Some(motion_area))) => {
+                                    info!("Motion detected with area: {:.2}", motion_area);
+                                }
+                                Ok(Ok(None)) => {
+                                    debug!("No motion detected in frame {}", frame.id);
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Motion analysis error: {}", e);
+                                    
+                                    // Publish system error event
+                                    if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
+                                        component: "motion_analyzer_integration".to_string(),
+                                        error: e.to_string(),
+                                    }).await {
+                                        error!("Failed to publish motion analysis error event: {}", publish_err);
+                                    }
+                                }
+                                Err(_) => {
+                                    warn!("Motion analysis timeout, skipping frame {}", frame.id);
                                 }
                             }
-                            Err(_) => {
-                                warn!("Motion analysis timeout, skipping frame {}", frame.id);
-                            }
+                        } else {
+                            debug!("Frame {} already analyzed, skipping", frame.id);
                         }
                     } else {
                         debug!("No frames available for motion analysis");
                     }
                 }
+                
+                // Sleep for a short time to prevent busy waiting
+                // Use a shorter sleep when analysis is needed, longer when waiting for next interval
+                let sleep_duration = if should_analyze {
+                    Duration::from_millis(10) // Quick check after analysis
+                } else {
+                    // Sleep for a portion of the remaining time until next analysis
+                    let remaining_time = {
+                        let last_time = last_analysis_time.read().await;
+                        frame_interval.saturating_sub(last_time.elapsed())
+                    };
+                    std::cmp::min(remaining_time / 4, Duration::from_millis(100))
+                };
+                
+                tokio::time::sleep(sleep_duration).await;
             }
             
             info!("Motion analysis task completed");
@@ -262,6 +269,12 @@ impl MotionAnalyzerIntegration {
                     warn!("Event handler task did not complete within timeout, aborting");
                 }
             }
+        }
+
+        // Clean up GStreamer resources
+        {
+            let mut analyzer = self.analyzer.write().await;
+            analyzer.cleanup();
         }
         
         info!("Motion analyzer integration stopped");
@@ -394,6 +407,7 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -421,6 +435,7 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -446,6 +461,7 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -486,6 +502,7 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -505,6 +522,7 @@ mod tests {
             max_fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
+            hardware_acceleration: false,
         };
         
         assert!(integration.update_config(new_config.clone()).await.is_ok());

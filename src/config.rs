@@ -52,6 +52,14 @@ pub struct AnalyzerConfig {
     /// Minimum contour area to trigger motion
     #[serde(default = "default_contour_area")]
     pub contour_minimum_area: f64,
+
+    /// Enable hardware acceleration for GStreamer pipeline
+    #[serde(default = "default_hardware_acceleration")]
+    pub hardware_acceleration: bool,
+
+    /// JPEG decoding resolution scale (1=full, 2=1/2, 4=1/4, 8=1/8)
+    #[serde(default = "default_jpeg_decode_scale")]
+    pub jpeg_decode_scale: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -116,6 +124,10 @@ pub struct DisplayConfig {
     
     /// Display rotation
     pub rotation: Option<Rotation>,
+
+    /// JPEG decoding resolution scale for display (1=full, 2=1/2, 4=1/4, 8=1/8)
+    #[serde(default = "default_display_jpeg_decode_scale")]
+    pub jpeg_decode_scale: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -164,6 +176,8 @@ impl DoorcamConfig {
             .set_default("analyzer.max_fps", default_analyzer_fps())?
             .set_default("analyzer.delta_threshold", default_delta_threshold())?
             .set_default("analyzer.contour_minimum_area", default_contour_area())?
+            .set_default("analyzer.hardware_acceleration", default_hardware_acceleration())?
+            .set_default("analyzer.jpeg_decode_scale", default_jpeg_decode_scale())?
             .set_default("capture.preroll_seconds", default_preroll_seconds())?
             .set_default("capture.postroll_seconds", default_postroll_seconds())?
             .set_default("capture.path", default_capture_path())?
@@ -177,6 +191,7 @@ impl DoorcamConfig {
             .set_default("display.touch_device", default_touch_device())?
             .set_default("display.activation_period_seconds", default_activation_period())?
             .set_default("display.resolution", vec![default_display_resolution().0, default_display_resolution().1])?
+            .set_default("display.jpeg_decode_scale", default_display_jpeg_decode_scale())?
             .set_default("system.trim_old", default_trim_old())?
             .set_default("system.retention_days", default_retention_days())?
             .set_default("system.ring_buffer_capacity", default_ring_buffer_capacity() as i64)?
@@ -233,6 +248,8 @@ fn default_camera_format() -> String { "MJPG".to_string() }
 fn default_analyzer_fps() -> u32 { 5 }
 fn default_delta_threshold() -> u32 { 25 }
 fn default_contour_area() -> f64 { 1000.0 }
+fn default_hardware_acceleration() -> bool { true }
+fn default_jpeg_decode_scale() -> u32 { 4 } // Default to 1/4 resolution for efficiency
 
 fn default_preroll_seconds() -> u32 { 5 }
 fn default_postroll_seconds() -> u32 { 10 }
@@ -249,6 +266,7 @@ fn default_backlight_device() -> String { "/sys/class/backlight/rpi_backlight/br
 fn default_touch_device() -> String { "/dev/input/event0".to_string() }
 fn default_activation_period() -> u32 { 30 }
 fn default_display_resolution() -> (u32, u32) { (800, 480) }
+fn default_display_jpeg_decode_scale() -> u32 { 4 } // Default to 1/4 resolution for efficiency
 
 fn default_trim_old() -> bool { true }
 fn default_retention_days() -> u32 { 7 }
@@ -274,6 +292,8 @@ mod tests {
                 max_fps: default_analyzer_fps(),
                 delta_threshold: default_delta_threshold(),
                 contour_minimum_area: default_contour_area(),
+                hardware_acceleration: default_hardware_acceleration(),
+                jpeg_decode_scale: default_jpeg_decode_scale(),
             },
             capture: CaptureConfig {
                 preroll_seconds: default_preroll_seconds(),
@@ -294,6 +314,7 @@ mod tests {
                 activation_period_seconds: default_activation_period(),
                 resolution: default_display_resolution(),
                 rotation: None,
+                jpeg_decode_scale: default_display_jpeg_decode_scale(),
             },
             system: SystemConfig {
                 trim_old: default_trim_old(),
@@ -335,6 +356,8 @@ mod tests {
                 max_fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
+                hardware_acceleration: true,
+                jpeg_decode_scale: 4,
             },
             capture: CaptureConfig {
                 preroll_seconds: 5,
@@ -355,6 +378,7 @@ mod tests {
                 activation_period_seconds: 30,
                 resolution: (800, 480),
                 rotation: None,
+                jpeg_decode_scale: 4,
             },
             system: SystemConfig {
                 trim_old: true,

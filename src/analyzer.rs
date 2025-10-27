@@ -106,22 +106,82 @@ impl MotionAnalyzer {
     /// Initialize GStreamer preprocessing pipeline for motion analysis
     #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
     async fn initialize_preprocessing_pipeline(&mut self) -> Result<()> {
-        // Create pipeline for JPEG -> grayscale conversion with optional scaling
-        let pipeline_desc = format!(
+        // Calculate target resolution based on decode scale configuration
+        let target_width = 320;  // Base resolution for motion analysis
+        let target_height = 240;
+        
+        // Map decode scale to jpegdec idct-method
+        let idct_method = match self.config.jpeg_decode_scale {
+            1 => 0,  // Full resolution
+            2 => 1,  // 1/2 resolution
+            4 => 4,  // 1/4 resolution (recommended for motion analysis)
+            8 => 2,  // 1/8 resolution
+            _ => {
+                warn!("Invalid jpeg_decode_scale {}, using 1/4 resolution", self.config.jpeg_decode_scale);
+                4
+            }
+        };
+        
+        // Define hardware pipeline with direct downscaling if supported
+        let hw_pipeline_desc = format!(
             "appsrc name=src format=time is-live=true caps=image/jpeg ! \
-             jpegdec ! \
-             videoconvert ! \
-             videoscale ! \
-             video/x-raw,format=GRAY8,width=320,height=240 ! \
-             appsink name=sink sync=false max-buffers=1 drop=true"
+             v4l2jpegdec ! \
+             v4l2convert ! \
+             video/x-raw,format=GRAY8,width={},height={} ! \
+             appsink name=sink sync=false max-buffers=1 drop=true",
+            target_width, target_height
         );
 
-        debug!("Creating motion analysis preprocessing pipeline: {}", pipeline_desc);
+        // Software pipeline with configurable resolution JPEG decoding
+        let sw_pipeline_desc = format!(
+            "appsrc name=src format=time is-live=true caps=image/jpeg ! \
+             jpegdec idct-method={} ! \
+             videoconvert ! \
+             video/x-raw,format=GRAY8 ! \
+             videoscale method=0 ! \
+             video/x-raw,format=GRAY8,width={},height={} ! \
+             appsink name=sink sync=false max-buffers=1 drop=true",
+            idct_method, target_width, target_height
+        );
 
-        let pipeline = gstreamer::parse::launch(&pipeline_desc)
-            .map_err(|e| AnalyzerError::FrameProcessing {
-                details: format!("Failed to create preprocessing pipeline: {}", e),
-            })?
+        // Choose pipeline based on configuration and availability
+        // Note: jpegdec idct-method options for efficient partial decoding:
+        // - idct-method=0: Full resolution (decode_scale=1)
+        // - idct-method=1: 1/2 resolution (decode_scale=2, fast)
+        // - idct-method=4: 1/4 resolution (decode_scale=4, fastest, similar to OpenCV's 1/4 decode)
+        // - idct-method=2: 1/8 resolution (decode_scale=8, very fast but very low quality)
+        info!("Using JPEG decode scale 1/{} (idct-method={})", self.config.jpeg_decode_scale, idct_method);
+        let (pipeline, _use_hw) = if self.config.hardware_acceleration {
+            debug!("Attempting hardware-accelerated motion analysis pipeline: {}", hw_pipeline_desc);
+            
+            match gstreamer::parse::launch(&hw_pipeline_desc) {
+                Ok(pipeline) => {
+                    info!("Hardware-accelerated GStreamer pipeline created successfully");
+                    (pipeline, true)
+                }
+                Err(e) => {
+                    warn!("Hardware acceleration not available ({}), falling back to software pipeline", e);
+                    debug!("Creating software motion analysis pipeline: {}", sw_pipeline_desc);
+                    
+                    let sw_pipeline = gstreamer::parse::launch(&sw_pipeline_desc)
+                        .map_err(|e| AnalyzerError::FrameProcessing {
+                            details: format!("Failed to create software pipeline: {}", e),
+                        })?;
+                    (sw_pipeline, false)
+                }
+            }
+        } else {
+            info!("Hardware acceleration disabled by configuration, using software pipeline");
+            debug!("Creating software motion analysis pipeline: {}", sw_pipeline_desc);
+            
+            let sw_pipeline = gstreamer::parse::launch(&sw_pipeline_desc)
+                .map_err(|e| AnalyzerError::FrameProcessing {
+                    details: format!("Failed to create software pipeline: {}", e),
+                })?;
+            (sw_pipeline, false)
+        };
+
+        let pipeline = pipeline
             .downcast::<Pipeline>()
             .map_err(|_| AnalyzerError::FrameProcessing {
                 details: "Failed to downcast to Pipeline".to_string(),
@@ -333,7 +393,7 @@ impl MotionAnalyzer {
                 map.copy_from_slice(frame.data.as_ref());
             }
 
-            // Set timestamp
+            // Set timestamp for proper pipeline timing
             buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(
                 frame.timestamp.duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -361,13 +421,19 @@ impl MotionAnalyzer {
                 })?;
 
                 // Create grayscale image from processed data (320x240 GRAY8)
+                // This is 1/4 resolution for efficient motion analysis
                 let gray_image = GrayImage::from_raw(320, 240, map.as_slice().to_vec())
                     .ok_or_else(|| AnalyzerError::FrameProcessing {
                         details: "Failed to create grayscale image from processed data".to_string(),
                     })?;
 
-                debug!("Successfully preprocessed frame {} using GStreamer (320x240)", frame.id);
+                debug!("Successfully preprocessed frame {} using GStreamer 1/{} resolution decode (320x240)", 
+                       frame.id, self.config.jpeg_decode_scale);
                 return Ok(gray_image);
+            } else {
+                return Err(AnalyzerError::FrameProcessing {
+                    details: "No sample available from GStreamer pipeline".to_string(),
+                }.into());
             }
         }
 
@@ -482,6 +548,26 @@ impl MotionAnalyzer {
         info!("Updating motion analyzer configuration: {:?}", config);
         self.config = config;
     }
+
+    /// Cleanup GStreamer resources
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    pub fn cleanup(&mut self) {
+        if let Some(ref pipeline) = self.preprocessing_pipeline {
+            debug!("Stopping GStreamer preprocessing pipeline");
+            if let Err(e) = pipeline.set_state(gstreamer::State::Null) {
+                warn!("Failed to stop GStreamer pipeline cleanly: {}", e);
+            }
+        }
+        self.preprocessing_pipeline = None;
+        self.appsrc = None;
+        self.appsink = None;
+        debug!("GStreamer preprocessing pipeline cleaned up");
+    }
+
+    #[cfg(not(all(feature = "motion_analysis", target_os = "linux")))]
+    pub fn cleanup(&mut self) {
+        // No-op for non-GStreamer builds
+    }
 }
 
 #[cfg(test)]
@@ -496,6 +582,8 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let analyzer = MotionAnalyzer::new(config).await;
@@ -512,6 +600,8 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
+            hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let mut analyzer = MotionAnalyzer::new(initial_config).await.unwrap();
@@ -520,6 +610,8 @@ mod tests {
             max_fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
+            hardware_acceleration: false,
+            jpeg_decode_scale: 2,
         };
         
         analyzer.update_config(new_config);
@@ -534,6 +626,8 @@ mod tests {
             max_fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 100.0,
+            hardware_acceleration: false, // Disable for synthetic test
+            jpeg_decode_scale: 4,
         };
         
         let mut analyzer = MotionAnalyzer::new(config).await.unwrap();
