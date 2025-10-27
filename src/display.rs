@@ -69,18 +69,57 @@ impl DisplayController {
     /// Initialize GStreamer display pipeline with hardware acceleration
     #[cfg(all(feature = "display", target_os = "linux"))]
     async fn initialize_display_pipeline(&self) -> Result<()> {
-        let (width, height) = self.config.resolution;
+        let (display_width, display_height) = self.config.resolution;
         
-        // Build hardware-accelerated display pipeline
-        let pipeline_desc = format!(
-            "appsrc name=src format=time is-live=true caps=image/jpeg ! \
-             jpegdec ! \
-             videoconvert ! \
+        // Calculate pre-rotation dimensions based on rotation angle
+        // For 90/270 degree rotations, we need to swap dimensions before rotating
+        let (pre_rotation_width, pre_rotation_height) = match &self.config.rotation {
+            Some(crate::config::Rotation::Rotate90) | Some(crate::config::Rotation::Rotate270) => {
+                // Swap dimensions so after rotation they'll be correct
+                (display_height, display_width)
+            }
+            _ => {
+                // No rotation or 180 degree rotation - keep original dimensions
+                (display_width, display_height)
+            }
+        };
+        
+        // Build hardware-accelerated display pipeline - downsize BEFORE rotation for better performance
+        let mut pipeline_desc = String::from("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec");
+        
+        // First downsize to pre-rotation dimensions
+        pipeline_desc.push_str(&format!(
+            " ! videoconvert ! \
              videoscale ! \
-             video/x-raw,format=RGB16,width={},height={} ! \
-             fbdevsink device={} sync=false",
-            width, height, self.config.framebuffer_device
-        );
+             video/x-raw,width={},height={}",
+            pre_rotation_width, pre_rotation_height
+        ));
+        
+        // Then add rotation if configured (now operating on smaller image)
+        if let Some(rotation) = &self.config.rotation {
+            let flip_method = match rotation {
+                crate::config::Rotation::Rotate90 => "clockwise",
+                crate::config::Rotation::Rotate180 => "rotate-180", 
+                crate::config::Rotation::Rotate270 => "counterclockwise",
+            };
+            
+            pipeline_desc.push_str(&format!(" ! videoflip method={}", flip_method));
+            let degrees = match rotation {
+                crate::config::Rotation::Rotate90 => 90,
+                crate::config::Rotation::Rotate180 => 180,
+                crate::config::Rotation::Rotate270 => 270,
+            };
+            info!("Display rotation enabled: {} degrees ({}) - scaling to {}x{} before rotation to achieve final {}x{}", 
+                  degrees, flip_method, pre_rotation_width, pre_rotation_height, display_width, display_height);
+        }
+        
+        // Final format conversion and output with optimized buffering
+        pipeline_desc.push_str(&format!(
+            " ! videoconvert ! \
+             video/x-raw,format=RGB16 ! \
+             fbdevsink device={} sync=false max-lateness=-1 async=false",
+            self.config.framebuffer_device
+        ));
 
         info!("Creating GStreamer display pipeline: {}", pipeline_desc);
 
@@ -104,9 +143,12 @@ impl DisplayController {
                 details: "Failed to downcast to AppSrc".to_string(),
             })?;
 
-        // Configure appsrc
-        appsrc.set_property("format", gstreamer::Format::Time);
+        // Configure appsrc for low-latency live streaming
+        appsrc.set_property("format", gstreamer::Format::Bytes); // Use bytes format for immediate processing
         appsrc.set_property("is-live", true);
+        appsrc.set_property("max-bytes", 200000u64); // Limit internal queue size
+        appsrc.set_property("block", false); // Don't block when queue is full
+        appsrc.set_property("do-timestamp", false); // Don't apply timestamps for immediate rendering
 
         // Store pipeline and appsrc
         {
@@ -333,15 +375,16 @@ impl DisplayController {
         let mut backlight = self.backlight.write().await;
         
         if let Some(ref mut bl_file) = *backlight {
-            let brightness_value = if enabled { "255" } else { "0" };
+            // For bl_power: "0" = ON, "1" = OFF (inverted logic)
+            let power_value = if enabled { "0" } else { "1" };
             
-            // Seek to beginning and write brightness value
+            // Seek to beginning and write power value
             bl_file.seek(SeekFrom::Start(0))
                 .map_err(|e| DisplayError::Backlight { 
                     details: format!("Failed to seek backlight: {}", e) 
                 })?;
             
-            bl_file.write_all(brightness_value.as_bytes())
+            bl_file.write_all(power_value.as_bytes())
                 .map_err(|e| DisplayError::Backlight { 
                     details: format!("Failed to write backlight: {}", e) 
                 })?;
@@ -351,7 +394,7 @@ impl DisplayController {
                     details: format!("Failed to flush backlight: {}", e) 
                 })?;
             
-            debug!("Backlight set to: {}", if enabled { "ON" } else { "OFF" });
+            debug!("Backlight set to: {} (power value: {})", if enabled { "ON" } else { "OFF" }, power_value);
         } else {
             // Try to reinitialize backlight
             match self.open_backlight().await {
@@ -362,14 +405,15 @@ impl DisplayController {
                     drop(backlight);
                     let mut backlight_retry = self.backlight.write().await;
                     if let Some(ref mut bl_file) = *backlight_retry {
-                        let brightness_value = if enabled { "255" } else { "0" };
+                        // For bl_power: "0" = ON, "1" = OFF (inverted logic)
+                        let power_value = if enabled { "0" } else { "1" };
                         
                         bl_file.seek(SeekFrom::Start(0))
                             .map_err(|e| DisplayError::Backlight { 
                                 details: format!("Failed to seek backlight: {}", e) 
                             })?;
                         
-                        bl_file.write_all(brightness_value.as_bytes())
+                        bl_file.write_all(power_value.as_bytes())
                             .map_err(|e| DisplayError::Backlight { 
                                 details: format!("Failed to write backlight: {}", e) 
                             })?;
@@ -379,7 +423,7 @@ impl DisplayController {
                                 details: format!("Failed to flush backlight: {}", e) 
                             })?;
                         
-                        debug!("Backlight set to: {}", if enabled { "ON" } else { "OFF" });
+                        debug!("Backlight set to: {} (power value: {})", if enabled { "ON" } else { "OFF" }, power_value);
                     }
                 }
                 Err(e) => {
@@ -462,12 +506,8 @@ impl DisplayController {
                 map.copy_from_slice(&jpeg_data);
             }
 
-            // Set timestamp
-            buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(
-                frame.timestamp.duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as u64
-            ));
+            // Don't set timestamp for live display - this can cause buffering delays
+            // For live display, we want immediate rendering without synchronization
 
             // Push buffer to appsrc
             appsrc.push_buffer(buffer)

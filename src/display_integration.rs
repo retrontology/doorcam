@@ -103,7 +103,9 @@ impl DisplayIntegration {
         let is_running = Arc::clone(&self.is_running);
 
         let task = tokio::spawn(async move {
-            let mut render_interval = interval(Duration::from_millis(33)); // ~30 FPS
+            // Use higher refresh rate (60 FPS) to ensure we catch new frames quickly
+            let mut render_interval = interval(Duration::from_millis(16)); // ~60 FPS for responsive display
+            let mut last_frame_id = 0u64;
 
             while *is_running.read().await {
                 render_interval.tick().await;
@@ -116,14 +118,19 @@ impl DisplayIntegration {
                 // Only render if display is active
                 if display_controller.is_active() {
                     if let Some(frame) = ring_buffer.get_latest_frame().await {
-                        if let Err(e) = display_controller.render_frame(&frame).await {
-                            error!("Failed to render frame to display: {}", e);
+                        // Only render if we have a new frame to avoid unnecessary work
+                        if frame.id > last_frame_id {
+                            last_frame_id = frame.id;
                             
-                            // Publish error event
-                            let _ = event_bus.publish(DoorcamEvent::SystemError {
-                                component: "display_rendering".to_string(),
-                                error: e.to_string(),
-                            }).await;
+                            if let Err(e) = display_controller.render_frame(&frame).await {
+                                error!("Failed to render frame to display: {}", e);
+                                
+                                // Publish error event
+                                let _ = event_bus.publish(DoorcamEvent::SystemError {
+                                    component: "display_rendering".to_string(),
+                                    error: e.to_string(),
+                                }).await;
+                            }
                         }
                     }
                 }
