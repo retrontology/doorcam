@@ -110,17 +110,7 @@ impl MotionAnalyzer {
         let target_width = 320;  // Base resolution for motion analysis
         let target_height = 240;
         
-        // Map decode scale to jpegdec idct-method
-        let idct_method = match self.config.jpeg_decode_scale {
-            1 => 0,  // Full resolution
-            2 => 1,  // 1/2 resolution
-            4 => 4,  // 1/4 resolution (recommended for motion analysis)
-            8 => 2,  // 1/8 resolution
-            _ => {
-                warn!("Invalid jpeg_decode_scale {}, using 1/4 resolution", self.config.jpeg_decode_scale);
-                4
-            }
-        };
+        info!("Using JPEG decode scale 1/{}", self.config.jpeg_decode_scale);
         
         // Define hardware pipeline with direct downscaling if supported
         let hw_pipeline_desc = format!(
@@ -132,25 +122,22 @@ impl MotionAnalyzer {
             target_width, target_height
         );
 
-        // Software pipeline with configurable resolution JPEG decoding
+        // Software pipeline - decode JPEG and scale down for motion analysis
+        // Note: jpegdec doesn't support idct-method property, so we decode at full resolution
+        // and then scale down using videoscale for better performance
         let sw_pipeline_desc = format!(
             "appsrc name=src format=time is-live=true caps=image/jpeg ! \
-             jpegdec idct-method={} ! \
+             jpegdec ! \
              videoconvert ! \
              video/x-raw,format=GRAY8 ! \
              videoscale method=0 ! \
              video/x-raw,format=GRAY8,width={},height={} ! \
              appsink name=sink sync=false max-buffers=1 drop=true",
-            idct_method, target_width, target_height
+            target_width, target_height
         );
 
         // Choose pipeline based on configuration and availability
-        // Note: jpegdec idct-method options for efficient partial decoding:
-        // - idct-method=0: Full resolution (decode_scale=1)
-        // - idct-method=1: 1/2 resolution (decode_scale=2, fast)
-        // - idct-method=4: 1/4 resolution (decode_scale=4, fastest, similar to OpenCV's 1/4 decode)
-        // - idct-method=2: 1/8 resolution (decode_scale=8, very fast but very low quality)
-        info!("Using JPEG decode scale 1/{} (idct-method={})", self.config.jpeg_decode_scale, idct_method);
+        info!("Initializing GStreamer pipeline for motion analysis");
         let (pipeline, _use_hw) = if self.config.hardware_acceleration {
             debug!("Attempting hardware-accelerated motion analysis pipeline: {}", hw_pipeline_desc);
             
