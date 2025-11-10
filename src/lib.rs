@@ -17,6 +17,7 @@ pub mod capture_integration;
 pub mod storage;
 pub mod storage_integration;
 pub mod app_orchestration;
+pub mod keyboard_input;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -47,6 +48,7 @@ pub use capture::{VideoCapture, CaptureStats, CaptureMetadata};
 pub use capture_integration::{VideoCaptureIntegration, VideoCaptureIntegrationBuilder};
 pub use storage::{EventStorage, StoredEventMetadata, StoredEventType, StorageStats, CleanupResult};
 pub use storage_integration::{EventStorageIntegration, EventStorageIntegrationBuilder, StorageIntegrationStats, CombinedStorageStats, StorageHealthStatus, HealthStatus as StorageHealthStatusLevel};
+pub use keyboard_input::KeyboardInputHandler;
 
 #[cfg(feature = "streaming")]
 pub use streaming::{StreamServer, StreamServerBuilder, StreamStats};

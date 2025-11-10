@@ -49,6 +49,10 @@ struct Args {
     /// Enable systemd journal integration
     #[arg(long, help = "Enable systemd journal integration for logging")]
     systemd: bool,
+
+    /// Enable keyboard input for debugging (SPACE=motion, Q/ESC=quit)
+    #[arg(long, help = "Enable keyboard input handler for debugging motion events")]
+    enable_keyboard: bool,
 }
 
 #[tokio::main]
@@ -104,6 +108,12 @@ async fn main() -> Result<()> {
             e
         })?;
 
+    // Enable keyboard handler if requested
+    if args.enable_keyboard {
+        orchestrator.set_keyboard_enabled(true);
+        info!("Keyboard input handler enabled");
+    }
+
     // Initialize all components
     orchestrator.initialize().await
         .map_err(|e| {
@@ -124,6 +134,14 @@ async fn main() -> Result<()> {
             error!("Failed to start system: {}", e);
             e
         })?;
+
+    // Show keyboard controls if enabled
+    if args.enable_keyboard {
+        info!("=== Doorcam Debug Controls ===");
+        info!("Press SPACE to trigger a motion event");
+        info!("Press Q or ESC to shutdown gracefully");
+        info!("==============================");
+    }
 
     // Run the main application loop with signal handling
     let exit_code = orchestrator.run().await

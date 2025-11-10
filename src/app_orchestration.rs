@@ -7,6 +7,7 @@ use crate::analyzer_integration::MotionAnalyzerIntegration;
 use crate::display_integration::DisplayIntegration;
 use crate::capture_integration::VideoCaptureIntegration;
 use crate::storage_integration::EventStorageIntegration;
+use crate::keyboard_input::KeyboardInputHandler;
 
 #[cfg(feature = "streaming")]
 use crate::streaming::StreamServer;
@@ -51,6 +52,8 @@ pub struct DoorcamOrchestrator {
     display_integration: Option<DisplayIntegration>,
     capture_integration: Option<VideoCaptureIntegration>,
     storage_integration: Option<EventStorageIntegration>,
+    keyboard_handler: Option<KeyboardInputHandler>,
+    keyboard_enabled: bool,
     #[cfg(feature = "streaming")]
     stream_server: Option<StreamServer>,
     
@@ -114,6 +117,9 @@ impl DoorcamOrchestrator {
             Arc::clone(&event_bus),
         ));
         
+        // Initialize keyboard input handler for debugging (disabled by default)
+        let keyboard_handler = Some(KeyboardInputHandler::new(Arc::clone(&event_bus)));
+        
         Ok(Self {
             config,
             event_bus,
@@ -123,6 +129,8 @@ impl DoorcamOrchestrator {
             display_integration,
             capture_integration,
             storage_integration,
+            keyboard_handler,
+            keyboard_enabled: false, // Disabled by default, enable via set_keyboard_enabled()
             #[cfg(feature = "streaming")]
             stream_server,
             component_states: Arc::new(Mutex::new(HashMap::new())),
@@ -130,6 +138,11 @@ impl DoorcamOrchestrator {
             shutdown_receiver: Some(shutdown_receiver),
             cancellation_token: CancellationToken::new(),
         })
+    }
+    
+    /// Enable or disable the keyboard input handler
+    pub fn set_keyboard_enabled(&mut self, enabled: bool) {
+        self.keyboard_enabled = enabled;
     }
     
     /// Initialize all system components
@@ -143,6 +156,11 @@ impl DoorcamOrchestrator {
         states.insert("display".to_string(), ComponentState::Stopped);
         states.insert("capture".to_string(), ComponentState::Stopped);
         states.insert("storage".to_string(), ComponentState::Stopped);
+        
+        // Only register keyboard component if enabled
+        if self.keyboard_enabled {
+            states.insert("keyboard".to_string(), ComponentState::Stopped);
+        }
         
         #[cfg(feature = "streaming")]
         states.insert("streaming".to_string(), ComponentState::Stopped);
@@ -265,6 +283,21 @@ impl DoorcamOrchestrator {
             info!("Storage integration started successfully");
         }
         
+        // Start keyboard input handler for debugging (only if enabled)
+        if self.keyboard_enabled {
+            if let Some(keyboard_handler) = &self.keyboard_handler {
+                self.set_component_state("keyboard", ComponentState::Starting).await;
+                
+                keyboard_handler.start().await.map_err(|e| {
+                    error!("Failed to start keyboard handler: {}", e);
+                    e
+                })?;
+                
+                self.set_component_state("keyboard", ComponentState::Running).await;
+                info!("Keyboard input handler started - press SPACE to trigger motion");
+            }
+        }
+        
         info!("Doorcam system started successfully");
         Ok(())
     }
@@ -340,6 +373,13 @@ impl DoorcamOrchestrator {
         let mut exit_code = 0;
         
         // Stop components in reverse dependency order
+        if self.keyboard_enabled {
+            if let Err(e) = self.stop_component("keyboard").await {
+                error!("Error stopping keyboard: {}", e);
+                exit_code = 1;
+            }
+        }
+        
         #[cfg(feature = "streaming")]
         if let Err(e) = self.stop_component("streaming").await {
             error!("Error stopping streaming: {}", e);
@@ -485,6 +525,31 @@ impl DoorcamOrchestrator {
             "storage" => {
                 if let Some(storage_integration) = &self.storage_integration {
                     match timeout(Duration::from_secs(5), storage_integration.stop()).await {
+                        Ok(Ok(())) => {
+                            self.set_component_state(component, ComponentState::Stopped).await;
+                            info!("{} component stopped", component);
+                            Ok(())
+                        }
+                        Ok(Err(e)) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            error!("Error stopping {} component: {}", component, e);
+                            Err(e)
+                        }
+                        Err(_) => {
+                            self.set_component_state(component, ComponentState::Failed).await;
+                            let err = DoorcamError::System { message: format!("{} component stop timeout", component) };
+                            error!("{} component stop timeout", component);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    self.set_component_state(component, ComponentState::Stopped).await;
+                    Ok(())
+                }
+            }
+            "keyboard" => {
+                if let Some(keyboard_handler) = &self.keyboard_handler {
+                    match timeout(Duration::from_secs(2), keyboard_handler.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped).await;
                             info!("{} component stopped", component);
