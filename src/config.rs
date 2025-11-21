@@ -80,6 +80,14 @@ pub struct CaptureConfig {
     #[serde(default = "default_timestamp_overlay")]
     pub timestamp_overlay: bool,
     
+    /// Path to TrueType font file for timestamp overlay
+    #[serde(default = "default_timestamp_font_path")]
+    pub timestamp_font_path: String,
+    
+    /// Font size for timestamp overlay
+    #[serde(default = "default_timestamp_font_size")]
+    pub timestamp_font_size: f32,
+    
     /// Enable video encoding
     #[serde(default = "default_video_encoding")]
     pub video_encoding: bool,
@@ -182,6 +190,8 @@ impl DoorcamConfig {
             .set_default("capture.postroll_seconds", default_postroll_seconds())?
             .set_default("capture.path", default_capture_path())?
             .set_default("capture.timestamp_overlay", default_timestamp_overlay())?
+            .set_default("capture.timestamp_font_path", default_timestamp_font_path())?
+            .set_default("capture.timestamp_font_size", default_timestamp_font_size() as f64)?
             .set_default("capture.video_encoding", default_video_encoding())?
             .set_default("capture.keep_images", default_keep_images())?
             .set_default("stream.ip", default_stream_ip())?
@@ -255,6 +265,8 @@ fn default_preroll_seconds() -> u32 { 5 }
 fn default_postroll_seconds() -> u32 { 10 }
 fn default_capture_path() -> String { "./captures".to_string() }
 fn default_timestamp_overlay() -> bool { true }
+fn default_timestamp_font_path() -> String { "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string() }
+fn default_timestamp_font_size() -> f32 { 24.0 }
 fn default_video_encoding() -> bool { false }
 fn default_keep_images() -> bool { true }
 
@@ -300,6 +312,8 @@ mod tests {
                 postroll_seconds: default_postroll_seconds(),
                 path: default_capture_path(),
                 timestamp_overlay: default_timestamp_overlay(),
+                timestamp_font_path: default_timestamp_font_path(),
+                timestamp_font_size: default_timestamp_font_size(),
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
             },

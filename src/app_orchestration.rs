@@ -96,11 +96,17 @@ impl DoorcamOrchestrator {
             Arc::clone(&event_bus),
         ).await?);
         
-        // Initialize capture integration
+        // Initialize capture integration with camera's ring buffer
+        let capture_ring_buffer = if let Some(camera_integration) = &camera_integration {
+            camera_integration.ring_buffer()
+        } else {
+            Arc::clone(&ring_buffer)
+        };
+        
         let capture_integration = Some(VideoCaptureIntegration::new(
             config.capture.clone(),
             Arc::clone(&event_bus),
-            Arc::clone(&ring_buffer),
+            capture_ring_buffer,
         ));
         
         // Initialize storage integration

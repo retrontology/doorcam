@@ -256,6 +256,41 @@ impl RingBuffer {
         frames
     }
     
+    /// Get all frames with ID greater than the specified frame ID
+    /// 
+    /// This is useful for continuous streaming where you want to get only new frames
+    /// since the last processed frame.
+    /// 
+    /// # Arguments
+    /// * `last_frame_id` - The ID of the last processed frame
+    /// 
+    /// # Returns
+    /// Vector of frames with ID > last_frame_id, ordered by ID
+    pub async fn get_frames_since_id(&self, last_frame_id: u64) -> Vec<FrameData> {
+        let mut frames = Vec::new();
+        let current_index = self.write_index.load(Ordering::Relaxed);
+        
+        trace!("Collecting frames since ID {}", last_frame_id);
+        
+        // Check all slots for frames with higher IDs
+        for i in 0..self.capacity {
+            let index = (current_index + self.capacity - 1 - i) % self.capacity;
+            let slot = self.frames[index].read().await;
+            
+            if let Some(frame) = slot.as_ref() {
+                if frame.id > last_frame_id {
+                    frames.push(frame.clone());
+                }
+            }
+        }
+        
+        // Sort by ID to ensure chronological order
+        frames.sort_by_key(|f| f.id);
+        
+        trace!("Collected {} frames since ID {}", frames.len(), last_frame_id);
+        frames
+    }
+    
     /// Get the current buffer capacity
     pub fn capacity(&self) -> usize {
         self.capacity

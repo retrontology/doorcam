@@ -625,6 +625,7 @@ dependencies = [
  "image",
  "imageproc",
  "parking_lot",
+ "rusttype",
  "serde",
  "serde_json",
  "tempfile",

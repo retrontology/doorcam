@@ -74,10 +74,14 @@ optional = true
 version = "0.23"
 optional = true
 
+[dependencies.rusttype]
+version = "0.9"
+optional = true
+
 [features]
 default = ["camera", "motion_analysis", "streaming", "display", "video_encoding"]
 camera = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
-motion_analysis = ["dep:image", "dep:imageproc", "dep:gstreamer", "dep:gstreamer-app"]
+motion_analysis = ["dep:image", "dep:imageproc", "dep:rusttype", "dep:gstreamer", "dep:gstreamer-app"]
 streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
 display = ["dep:evdev", "dep:gstreamer", "dep:gstreamer-app"]
 video_encoding = ["dep:gstreamer", "dep:gstreamer-app"]

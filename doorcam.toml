@@ -50,6 +50,16 @@ path = "./captures"
 # Add timestamp overlay to captured images
 timestamp_overlay = true
 
+# Path to TrueType font file for timestamp overlay
+# Common locations:
+#   Debian/Ubuntu: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+#   Fedora/RHEL:   /usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf
+#   Arch:          /usr/share/fonts/TTF/DejaVuSans.ttf
+timestamp_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+# Font size for timestamp overlay (in points)
+timestamp_font_size = 24.0
+
 # Enable video encoding (requires hardware acceleration)
 video_encoding = false
 
