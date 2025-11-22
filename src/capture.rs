@@ -515,13 +515,18 @@ impl VideoCapture {
 
         // Use hardware H.264 encoding via V4L2 with explicit level setting
         // Note: Must set h264_level in extra-controls AND output caps level to avoid driver errors
+        // Higher quality encoding for 1920x1080:
+        // - 8 Mbps bitrate (good quality for Full HD)
+        // - Constant bitrate mode for consistent quality
+        // - High profile for better compression efficiency
         let pipeline_desc = format!(
             "appsrc name=src format=time is-live=false caps=image/jpeg,framerate=30/1 ! \
              jpegdec ! \
              videoconvert ! \
              video/x-raw,format=I420 ! \
-             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=2000000\" ! \
+             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=8000000,video_bitrate_mode=1\" ! \
              video/x-h264,level=(string)4 ! \
+             h264parse ! \
              mp4mux ! \
              filesink location={}",
             video_path.to_string_lossy()
