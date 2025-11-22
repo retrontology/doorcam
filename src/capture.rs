@@ -452,15 +452,12 @@ impl VideoCapture {
 
         #[cfg(all(feature = "video_encoding", target_os = "linux"))]
         {
-            if let Err(e) = Self::create_video_gstreamer_from_frames(&frames, &video_path, config).await {
-                warn!("GStreamer video encoding failed, using fallback: {}", e);
-                Self::create_video_fallback_with_count(&job, &video_path).await?;
-            }
+            Self::create_video_gstreamer_from_frames(&frames, &video_path, config).await?;
         }
 
         #[cfg(not(all(feature = "video_encoding", target_os = "linux")))]
         {
-            Self::create_video_fallback_with_count(&job, &video_path).await?;
+            return Err(DoorcamError::component("video_capture", "Video encoding not available on this platform"));
         }
 
         // Delete WAL file after successful encoding
@@ -516,21 +513,21 @@ impl VideoCapture {
             DoorcamError::component("video_capture", &format!("Failed to initialize GStreamer: {}", e))
         })?;
 
-        // Use software encoder (x264enc) - hardware encoder is broken on 64-bit Pi OS
-        // Hardware JPEG decoding is still used for efficiency
+        // Use hardware H.264 encoding via V4L2 with explicit level setting
+        // Note: Must set h264_level in extra-controls AND output caps level to avoid driver errors
         let pipeline_desc = format!(
             "appsrc name=src format=time is-live=false caps=image/jpeg,framerate=30/1 ! \
              jpegdec ! \
              videoconvert ! \
              video/x-raw,format=I420 ! \
-             x264enc speed-preset=ultrafast tune=zerolatency bitrate=2000 ! \
-             h264parse ! \
+             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=2000000\" ! \
+             video/x-h264,level=(string)4 ! \
              mp4mux ! \
              filesink location={}",
             video_path.to_string_lossy()
         );
         
-        let encoder_type = "software (x264enc with hardware JPEG decode)";
+        let encoder_type = "hardware (v4l2h264enc)";
 
         info!("Creating GStreamer video encoding pipeline using {} encoder", encoder_type);
         debug!("Pipeline: {}", pipeline_desc);
@@ -736,22 +733,7 @@ impl VideoCapture {
         }
     }
 
-    /// Fallback video creation (placeholder implementation)
-    async fn create_video_fallback_with_count(job: &VideoGenerationJob, video_path: &PathBuf) -> Result<()> {
-        // Create a placeholder video file for now
-        let video_info = format!(
-            "Video file for capture {}\nFrames: {}\nCreated: {:?}\nNote: GStreamer encoding not available\n",
-            job.event_id,
-            job.frame_count,
-            SystemTime::now()
-        );
 
-        fs::write(video_path, video_info).await
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create video file: {}", e)))?;
-
-        info!("Created placeholder video file (fallback mode)");
-        Ok(())
-    }
 
     /// Get statistics about active captures
     pub async fn get_capture_stats(&self) -> CaptureStats {

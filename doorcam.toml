@@ -21,13 +21,21 @@ format = "MJPG"
 
 [analyzer]
 # Maximum FPS for motion analysis (lower = less CPU usage)
-max_fps = 1
+# Recommended: 1-5 fps for efficiency, higher for more responsive detection
+max_fps = 2
 
 # Delta threshold for background subtraction (higher = less sensitive)
+# Recommended range: 15-50 for typical indoor/outdoor scenarios
+# Lower values (15-25) = more sensitive, detects subtle movements
+# Higher values (30-50) = less sensitive, ignores minor changes like shadows
 delta_threshold = 25
 
 # Minimum contour area to trigger motion detection (pixels)
-contour_minimum_area = 1000.0
+# NOTE: This value applies to the SCALED resolution (divided by jpeg_decode_scale)
+# With jpeg_decode_scale=4, effective resolution is 160x120 (640x480 / 4)
+# Recommended: 100-300 for person detection at scaled resolution
+# Adjust based on: area_at_full_res / (jpeg_decode_scale^2)
+contour_minimum_area = 150.0
 
 # Enable hardware acceleration for GStreamer pipeline (V4L2 on Raspberry Pi)
 hardware_acceleration = true
