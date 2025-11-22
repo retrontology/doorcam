@@ -202,13 +202,19 @@ impl VideoCapture {
         
         info!("No active capture to extend - starting new capture: {}", event_id);
 
-        // Create directory for metadata and frames (if needed)
+        // Create directory for frames only if needed
+        // Metadata will be stored in a shared metadata directory
         let capture_dir = PathBuf::from(&self.config.path).join(&event_id);
 
-        fs::create_dir_all(&capture_dir).await
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
+        // Only create event directory if we need to save images
+        if self.config.keep_images {
+            fs::create_dir_all(&capture_dir).await
+                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
 
-        info!("Created capture directory: {}", capture_dir.display());
+            info!("Created capture directory for images: {}", capture_dir.display());
+        } else {
+            debug!("Skipping capture directory creation (images disabled)");
+        }
 
         // Create capture event task
         let capture_task = CaptureEventTask::new(event_id.clone(), motion_time, capture_dir.clone());
@@ -342,19 +348,23 @@ impl VideoCapture {
             total_frames
         );
         
-        // Save metadata
-        let metadata = CaptureMetadata {
-            event_id: event_id.clone(),
-            start_time: capture_task.initial_motion_time - preroll_duration,
-            motion_detected_time: capture_task.initial_motion_time,
-            preroll_frame_count: preroll_count,
-            postroll_frame_count: total_frames - preroll_count,
-            total_frame_count: total_frames,
-            config: config.clone(),
-        };
-        
-        if let Err(e) = Self::save_metadata(&metadata, &capture_task.capture_dir).await {
-            warn!("Failed to save metadata for capture {}: {}", event_id, e);
+        // Save metadata if enabled (to shared metadata directory)
+        if config.save_metadata {
+            let metadata = CaptureMetadata {
+                event_id: event_id.clone(),
+                start_time: capture_task.initial_motion_time - preroll_duration,
+                motion_detected_time: capture_task.initial_motion_time,
+                preroll_frame_count: preroll_count,
+                postroll_frame_count: total_frames - preroll_count,
+                total_frame_count: total_frames,
+                config: config.clone(),
+            };
+            
+            if let Err(e) = Self::save_metadata(&metadata, &event_id, &config.path).await {
+                warn!("Failed to save metadata for capture {}: {}", event_id, e);
+            }
+        } else {
+            debug!("Skipping metadata save (disabled in config)");
         }
         
         // Queue video generation from WAL
@@ -402,12 +412,17 @@ impl VideoCapture {
 
 
     
-    /// Save metadata to disk
-    async fn save_metadata(metadata: &CaptureMetadata, capture_dir: &PathBuf) -> Result<()> {
+    /// Save metadata to disk in shared metadata directory
+    async fn save_metadata(metadata: &CaptureMetadata, event_id: &str, capture_path: &str) -> Result<()> {
         let metadata_json = serde_json::to_string_pretty(&metadata)
             .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to serialize metadata: {}", e)))?;
 
-        let metadata_path = capture_dir.join("metadata.json");
+        // Store metadata in shared metadata directory
+        let metadata_dir = PathBuf::from(capture_path).join("metadata");
+        fs::create_dir_all(&metadata_dir).await
+            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create metadata directory: {}", e)))?;
+
+        let metadata_path = metadata_dir.join(format!("{}.json", event_id));
         fs::write(&metadata_path, metadata_json).await
             .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to write metadata file: {}", e)))?;
 
@@ -781,9 +796,9 @@ impl VideoCapture {
             let frame_count = frames.len() as u32;
             
             // Capture directory should already exist (created when capture started)
-            // But create it if missing (in case it was deleted)
+            // But create it if missing (in case it was deleted) and if we need it for images
             let capture_dir = PathBuf::from(&self.config.path).join(&event_id);
-            if !capture_dir.exists() {
+            if !capture_dir.exists() && self.config.keep_images {
                 fs::create_dir_all(&capture_dir).await
                     .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
                 info!("Created missing capture directory for recovered event: {}", event_id);
@@ -879,8 +894,11 @@ mod tests {
             postroll_seconds: 3,
             path: "./test_captures".to_string(),
             timestamp_overlay: true,
+            timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            timestamp_font_size: 24.0,
             video_encoding: false,
             keep_images: true,
+            save_metadata: true,
         }
     }
 

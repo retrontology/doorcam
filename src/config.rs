@@ -95,6 +95,10 @@ pub struct CaptureConfig {
     /// Keep individual JPEG images
     #[serde(default = "default_keep_images")]
     pub keep_images: bool,
+    
+    /// Save metadata JSON files for each capture event
+    #[serde(default = "default_save_metadata")]
+    pub save_metadata: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -194,6 +198,7 @@ impl DoorcamConfig {
             .set_default("capture.timestamp_font_size", default_timestamp_font_size() as f64)?
             .set_default("capture.video_encoding", default_video_encoding())?
             .set_default("capture.keep_images", default_keep_images())?
+            .set_default("capture.save_metadata", default_save_metadata())?
             .set_default("stream.ip", default_stream_ip())?
             .set_default("stream.port", default_stream_port())?
             .set_default("display.framebuffer_device", default_framebuffer_device())?
@@ -268,7 +273,8 @@ fn default_timestamp_overlay() -> bool { true }
 fn default_timestamp_font_path() -> String { "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string() }
 fn default_timestamp_font_size() -> f32 { 24.0 }
 fn default_video_encoding() -> bool { false }
-fn default_keep_images() -> bool { true }
+fn default_keep_images() -> bool { false }
+fn default_save_metadata() -> bool { false }
 
 fn default_stream_ip() -> String { "0.0.0.0".to_string() }
 fn default_stream_port() -> u16 { 8080 }
@@ -316,6 +322,7 @@ mod tests {
                 timestamp_font_size: default_timestamp_font_size(),
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
+                save_metadata: default_save_metadata(),
             },
             stream: StreamConfig {
                 ip: default_stream_ip(),
@@ -378,8 +385,11 @@ mod tests {
                 postroll_seconds: 10,
                 path: "./captures".to_string(),
                 timestamp_overlay: true,
+                timestamp_font_path: default_timestamp_font_path(),
+                timestamp_font_size: default_timestamp_font_size(),
                 video_encoding: false,
-                keep_images: true,
+                keep_images: false,
+                save_metadata: false,
             },
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),

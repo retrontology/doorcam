@@ -644,14 +644,18 @@ mod tests {
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
                 hardware_acceleration: true,
+                jpeg_decode_scale: 4,
             },
             capture: crate::config::CaptureConfig {
                 preroll_seconds: 5,
                 postroll_seconds: 10,
                 path: "/tmp/doorcam_test".to_string(),
                 timestamp_overlay: true,
+                timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+                timestamp_font_size: 24.0,
                 video_encoding: false,
                 keep_images: true,
+                save_metadata: true,
             },
             system: crate::config::SystemConfig {
                 trim_old: true,
@@ -670,6 +674,7 @@ mod tests {
                 activation_period_seconds: 30,
                 resolution: (800, 480),
                 rotation: None,
+                jpeg_decode_scale: 4,
             },
         }
     }

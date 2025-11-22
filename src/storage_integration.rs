@@ -464,8 +464,11 @@ mod tests {
             postroll_seconds: 10,
             path: temp_dir.path().to_string_lossy().to_string(),
             timestamp_overlay: true,
+            timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            timestamp_font_size: 24.0,
             video_encoding: false,
             keep_images: true,
+            save_metadata: true,
         };
 
         let system_config = SystemConfig {

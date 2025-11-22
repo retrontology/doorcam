@@ -408,6 +408,7 @@ mod tests {
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -436,6 +437,7 @@ mod tests {
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -462,6 +464,7 @@ mod tests {
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -503,6 +506,7 @@ mod tests {
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
+            jpeg_decode_scale: 4,
         };
         
         let ring_buffer = RingBufferBuilder::new()
@@ -523,6 +527,7 @@ mod tests {
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
             hardware_acceleration: false,
+            jpeg_decode_scale: 4,
         };
         
         assert!(integration.update_config(new_config.clone()).await.is_ok());

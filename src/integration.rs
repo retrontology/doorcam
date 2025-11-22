@@ -279,8 +279,11 @@ mod tests {
                 postroll_seconds: 10,
                 path: "./captures".to_string(),
                 timestamp_overlay: true,
+                timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+                timestamp_font_size: 24.0,
                 video_encoding: false,
                 keep_images: true,
+                save_metadata: true,
             },
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),
@@ -293,6 +296,7 @@ mod tests {
                 activation_period_seconds: 30,
                 resolution: (800, 480),
                 rotation: None,
+                jpeg_decode_scale: 4,
             },
             system: SystemConfig {
                 trim_old: true,

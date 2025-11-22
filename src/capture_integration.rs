@@ -170,8 +170,11 @@ mod tests {
             postroll_seconds: 10,
             path: "./test_captures".to_string(),
             timestamp_overlay: true,
+            timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            timestamp_font_size: 24.0,
             video_encoding: false,
             keep_images: true,
+            save_metadata: true,
         }
     }
 

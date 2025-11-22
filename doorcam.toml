@@ -60,11 +60,15 @@ timestamp_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 # Font size for timestamp overlay (in points)
 timestamp_font_size = 24.0
 
-# Enable video encoding (requires hardware acceleration)
-video_encoding = false
+# Enable video encoding
+video_encoding = true
 
 # Keep individual JPEG images (in addition to video if enabled)
-keep_images = true
+keep_images = false
+
+# Save metadata JSON files for each capture event (stored in captures/metadata/)
+# Event subdirectories are only created when keep_images is true
+save_metadata = false
 
 [stream]
 # IP address to bind MJPEG stream server (0.0.0.0 = all interfaces)

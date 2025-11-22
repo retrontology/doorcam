@@ -203,10 +203,10 @@ impl EventStorage {
         // Parse timestamp from directory name
         let timestamp = self.parse_timestamp_from_directory_name(dir_name)?;
 
-        // Calculate directory size and file count (metadata, frames if any)
+        // Calculate directory size and file count (frames if any)
         let (mut file_count, mut total_size) = self.calculate_directory_stats(event_dir).await?;
         
-        // Add MP4 file size from root captures directory (new structure)
+        // Add MP4 file size from root captures directory
         let capture_path = PathBuf::from(&self.capture_config.path);
         let mp4_path = capture_path.join(format!("{}.mp4", dir_name));
         if mp4_path.exists() {
@@ -216,9 +216,20 @@ impl EventStorage {
                 debug!("Found MP4 file for event {}: {} bytes", dir_name, mp4_metadata.len());
             }
         }
+        
+        // Add metadata file size from shared metadata directory
+        let metadata_file_path = capture_path.join("metadata").join(format!("{}.json", dir_name));
+        if metadata_file_path.exists() {
+            if let Ok(metadata_file_metadata) = fs::metadata(&metadata_file_path).await {
+                file_count += 1;
+                total_size += metadata_file_metadata.len();
+                debug!("Found metadata file for event {}: {} bytes", dir_name, metadata_file_metadata.len());
+            }
+        }
 
-        // Try to load metadata if it exists
-        let metadata_path = event_dir.join("metadata.json");
+        // Try to load metadata from shared metadata directory
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let metadata_path = capture_path.join("metadata").join(format!("{}.json", dir_name));
         let event_type = if metadata_path.exists() {
             match self.load_event_type_from_metadata(&metadata_path).await {
                 Ok(event_type) => event_type,
@@ -232,10 +243,26 @@ impl EventStorage {
                 }
             }
         } else {
-            StoredEventType::MotionCapture {
-                motion_area: 0.0,
-                preroll_frames: 0,
-                postroll_frames: 0,
+            // Fallback: check old location in event directory for backward compatibility
+            let old_metadata_path = event_dir.join("metadata.json");
+            if old_metadata_path.exists() {
+                match self.load_event_type_from_metadata(&old_metadata_path).await {
+                    Ok(event_type) => event_type,
+                    Err(e) => {
+                        warn!("Failed to load metadata for {}: {}, using default", dir_name, e);
+                        StoredEventType::MotionCapture {
+                            motion_area: 0.0,
+                            preroll_frames: 0,
+                            postroll_frames: 0,
+                        }
+                    }
+                }
+            } else {
+                StoredEventType::MotionCapture {
+                    motion_area: 0.0,
+                    preroll_frames: 0,
+                    postroll_frames: 0,
+                }
             }
         };
 
@@ -348,37 +375,79 @@ impl EventStorage {
     async fn register_completed_capture(&self, event_id: &str, file_count: u32) -> Result<()> {
         debug!("Registering completed capture: {}", event_id);
 
-        // Find the event directory
         let capture_path = PathBuf::from(&self.capture_config.path);
-        let mut event_dir = None;
-
-        let mut entries = fs::read_dir(&capture_path).await
-            .map_err(|e| DoorcamError::component("event_storage", &format!("Failed to read capture directory: {}", e)))?;
-
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| DoorcamError::component("event_storage", &format!("Failed to read directory entry: {}", e)))? {
+        
+        // Check if event directory exists (for image-based captures)
+        let event_dir = capture_path.join(event_id);
+        
+        if event_dir.exists() && event_dir.is_dir() {
+            // Traditional mode: event directory exists with images
+            self.register_existing_event(&event_dir).await?;
+        } else {
+            // Video-only mode: no event directory, just register from metadata/MP4
+            // Parse timestamp from event_id
+            let timestamp = self.parse_timestamp_from_directory_name(event_id)?;
             
-            let path = entry.path();
-            if path.is_dir() {
-                // Check if this directory contains the event_id in its metadata
-                let metadata_path = path.join("metadata.json");
-                if metadata_path.exists() {
-                    if let Ok(content) = fs::read_to_string(&metadata_path).await {
-                        if content.contains(event_id) {
-                            event_dir = Some(path);
-                            break;
+            // Calculate file sizes
+            let mut file_count = 0u32;
+            let mut total_size = 0u64;
+            
+            // Check for MP4 file
+            let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+            if mp4_path.exists() {
+                if let Ok(mp4_metadata) = fs::metadata(&mp4_path).await {
+                    file_count += 1;
+                    total_size += mp4_metadata.len();
+                    debug!("Found MP4 file for event {}: {} bytes", event_id, mp4_metadata.len());
+                }
+            }
+            
+            // Check for metadata file
+            let metadata_path = capture_path.join("metadata").join(format!("{}.json", event_id));
+            let event_type = if metadata_path.exists() {
+                if let Ok(metadata_file_metadata) = fs::metadata(&metadata_path).await {
+                    file_count += 1;
+                    total_size += metadata_file_metadata.len();
+                    debug!("Found metadata file for event {}: {} bytes", event_id, metadata_file_metadata.len());
+                }
+                
+                match self.load_event_type_from_metadata(&metadata_path).await {
+                    Ok(event_type) => event_type,
+                    Err(e) => {
+                        warn!("Failed to load metadata for {}: {}, using default", event_id, e);
+                        StoredEventType::MotionCapture {
+                            motion_area: 0.0,
+                            preroll_frames: 0,
+                            postroll_frames: 0,
                         }
                     }
                 }
+            } else {
+                StoredEventType::MotionCapture {
+                    motion_area: 0.0,
+                    preroll_frames: 0,
+                    postroll_frames: 0,
+                }
+            };
+            
+            // Create event metadata
+            let event_metadata = StoredEventMetadata {
+                event_id: event_id.to_string(),
+                timestamp,
+                directory_path: event_dir, // Path even if it doesn't exist
+                file_count,
+                total_size_bytes: total_size,
+                event_type,
+                created_at: timestamp,
+                last_accessed: SystemTime::now(),
+            };
+            
+            // Register in memory
+            {
+                let mut registry = self.event_registry.write().await;
+                registry.events.insert(event_id.to_string(), event_metadata);
             }
         }
-
-        let event_dir = event_dir.ok_or_else(|| {
-            DoorcamError::component("event_storage", &format!("Event directory not found for {}", event_id))
-        })?;
-
-        // Register the event
-        self.register_existing_event(&event_dir).await?;
 
         info!("Registered completed capture: {} with {} files", event_id, file_count);
         Ok(())
@@ -616,29 +685,24 @@ impl EventStorage {
         // Validate deletion safety before proceeding
         self.validate_deletion_safety(&metadata.directory_path)?;
 
-        // Double-check directory exists and is within capture path
-        if !metadata.directory_path.exists() {
-            warn!("Event directory already deleted: {}", metadata.directory_path.display());
-            
-            // Remove from registry
-            {
-                let mut registry = self.event_registry.write().await;
-                registry.events.remove(event_id);
-            }
-            
-            return Ok(0);
-        }
-
+        // Validate directory path is within capture path (if directory exists)
         let capture_path = PathBuf::from(&self.capture_config.path);
-        if !metadata.directory_path.starts_with(&capture_path) {
-            return Err(DoorcamError::component(
-                "event_storage",
-                &format!("Event directory {} is outside capture path", metadata.directory_path.display())
-            ));
+        if metadata.directory_path.exists() {
+            if !metadata.directory_path.starts_with(&capture_path) {
+                return Err(DoorcamError::component(
+                    "event_storage",
+                    &format!("Event directory {} is outside capture path", metadata.directory_path.display())
+                ));
+            }
         }
 
-        // Calculate actual size before deletion (directory + MP4 file)
-        let (_, dir_size) = self.calculate_directory_stats(&metadata.directory_path).await?;
+        // Calculate actual size before deletion (directory + MP4 file + metadata file)
+        let dir_size = if metadata.directory_path.exists() {
+            let (_, size) = self.calculate_directory_stats(&metadata.directory_path).await?;
+            size
+        } else {
+            0
+        };
         
         // Add MP4 file size
         let capture_path = PathBuf::from(&self.capture_config.path);
@@ -651,7 +715,17 @@ impl EventStorage {
             0
         };
         
-        let actual_size = dir_size + mp4_size;
+        // Add metadata file size
+        let metadata_path = capture_path.join("metadata").join(format!("{}.json", event_id));
+        let metadata_size = if metadata_path.exists() {
+            fs::metadata(&metadata_path).await
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        
+        let actual_size = dir_size + mp4_size + metadata_size;
 
         // Create backup of metadata before deletion (for recovery purposes)
         let backup_metadata = serde_json::to_string_pretty(&metadata)
@@ -662,7 +736,7 @@ impl EventStorage {
             warn!("Failed to create deletion backup for {}: {}", event_id, e);
         }
 
-        // Remove MP4 file from root captures directory (new structure)
+        // Remove MP4 file from root captures directory
         let capture_path = PathBuf::from(&self.capture_config.path);
         let mp4_path = capture_path.join(format!("{}.mp4", event_id));
         if mp4_path.exists() {
@@ -674,12 +748,26 @@ impl EventStorage {
             debug!("Deleted MP4 file: {}", mp4_path.display());
         }
         
-        // Remove directory and all contents (metadata, frames if any)
-        fs::remove_dir_all(&metadata.directory_path).await
-            .map_err(|e| DoorcamError::component(
-                "event_storage", 
-                &format!("Failed to delete directory {}: {}", metadata.directory_path.display(), e)
-            ))?;
+        // Remove metadata file from shared metadata directory
+        let metadata_path = capture_path.join("metadata").join(format!("{}.json", event_id));
+        if metadata_path.exists() {
+            fs::remove_file(&metadata_path).await
+                .map_err(|e| DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to delete metadata file {}: {}", metadata_path.display(), e)
+                ))?;
+            debug!("Deleted metadata file: {}", metadata_path.display());
+        }
+        
+        // Remove event directory if it exists (for images)
+        if metadata.directory_path.exists() {
+            fs::remove_dir_all(&metadata.directory_path).await
+                .map_err(|e| DoorcamError::component(
+                    "event_storage", 
+                    &format!("Failed to delete directory {}: {}", metadata.directory_path.display(), e)
+                ))?;
+            debug!("Deleted event directory: {}", metadata.directory_path.display());
+        }
 
         // Remove from registry
         {
@@ -953,8 +1041,14 @@ impl EventStorage {
     }
 
     /// Validate that a directory is safe to delete (additional safety check)
+    /// Note: Directory might not exist if only video files are saved
     fn validate_deletion_safety(&self, path: &Path) -> Result<()> {
         let capture_path = PathBuf::from(&self.capture_config.path);
+        
+        // If directory doesn't exist, skip validation (it's okay - might be video-only mode)
+        if !path.exists() {
+            return Ok(());
+        }
         
         // Must be within capture directory
         if !path.starts_with(&capture_path) {
@@ -1014,14 +1108,14 @@ impl EventStorage {
             .any(|entry| {
                 if let Ok(entry) = entry {
                     if let Some(name) = entry.file_name().to_str() {
-                        return name.ends_with(".jpg") || name.ends_with(".jpeg") || name == "metadata.json";
+                        return name.ends_with(".jpg") || name.ends_with(".jpeg");
                     }
                 }
                 false
             });
 
         if !has_event_files {
-            warn!("Directory {} does not contain expected event files", path.display());
+            debug!("Directory {} does not contain image files (might be video-only mode)", path.display());
         }
 
         Ok(())
@@ -1077,8 +1171,11 @@ mod tests {
             postroll_seconds: 10,
             path: temp_dir.path().to_string_lossy().to_string(),
             timestamp_overlay: true,
+            timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            timestamp_font_size: 24.0,
             video_encoding: false,
             keep_images: true,
+            save_metadata: true,
         };
 
         let system_config = SystemConfig {
