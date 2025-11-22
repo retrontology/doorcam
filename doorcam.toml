@@ -28,14 +28,15 @@ max_fps = 2
 # Recommended range: 15-50 for typical indoor/outdoor scenarios
 # Lower values (15-25) = more sensitive, detects subtle movements
 # Higher values (30-50) = less sensitive, ignores minor changes like shadows
-delta_threshold = 25
+# FISHEYE: Increased to 32 to reduce false positives from edge distortion
+delta_threshold = 32
 
 # Minimum contour area to trigger motion detection (pixels)
 # NOTE: This value applies to the SCALED resolution (divided by jpeg_decode_scale)
 # With jpeg_decode_scale=4, effective resolution is 160x120 (640x480 / 4)
-# Recommended: 100-300 for person detection at scaled resolution
-# Adjust based on: area_at_full_res / (jpeg_decode_scale^2)
-contour_minimum_area = 150.0
+# FISHEYE: Lowered to 80 to detect objects in compressed center region
+# Objects appear smaller in center, larger at edges due to fisheye distortion
+contour_minimum_area = 80.0
 
 # Enable hardware acceleration for GStreamer pipeline (V4L2 on Raspberry Pi)
 hardware_acceleration = true
