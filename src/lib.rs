@@ -18,6 +18,7 @@ pub mod storage;
 pub mod storage_integration;
 pub mod app_orchestration;
 pub mod keyboard_input;
+pub mod wal;
 
 #[cfg(feature = "streaming")]
 pub mod streaming;

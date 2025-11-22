@@ -203,8 +203,19 @@ impl EventStorage {
         // Parse timestamp from directory name
         let timestamp = self.parse_timestamp_from_directory_name(dir_name)?;
 
-        // Calculate directory size and file count
-        let (file_count, total_size) = self.calculate_directory_stats(event_dir).await?;
+        // Calculate directory size and file count (metadata, frames if any)
+        let (mut file_count, mut total_size) = self.calculate_directory_stats(event_dir).await?;
+        
+        // Add MP4 file size from root captures directory (new structure)
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", dir_name));
+        if mp4_path.exists() {
+            if let Ok(mp4_metadata) = fs::metadata(&mp4_path).await {
+                file_count += 1;
+                total_size += mp4_metadata.len();
+                debug!("Found MP4 file for event {}: {} bytes", dir_name, mp4_metadata.len());
+            }
+        }
 
         // Try to load metadata if it exists
         let metadata_path = event_dir.join("metadata.json");
@@ -626,8 +637,21 @@ impl EventStorage {
             ));
         }
 
-        // Calculate actual size before deletion
-        let (_, actual_size) = self.calculate_directory_stats(&metadata.directory_path).await?;
+        // Calculate actual size before deletion (directory + MP4 file)
+        let (_, dir_size) = self.calculate_directory_stats(&metadata.directory_path).await?;
+        
+        // Add MP4 file size
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+        let mp4_size = if mp4_path.exists() {
+            fs::metadata(&mp4_path).await
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        
+        let actual_size = dir_size + mp4_size;
 
         // Create backup of metadata before deletion (for recovery purposes)
         let backup_metadata = serde_json::to_string_pretty(&metadata)
@@ -638,7 +662,19 @@ impl EventStorage {
             warn!("Failed to create deletion backup for {}: {}", event_id, e);
         }
 
-        // Remove directory and all contents
+        // Remove MP4 file from root captures directory (new structure)
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+        if mp4_path.exists() {
+            fs::remove_file(&mp4_path).await
+                .map_err(|e| DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to delete MP4 file {}: {}", mp4_path.display(), e)
+                ))?;
+            debug!("Deleted MP4 file: {}", mp4_path.display());
+        }
+        
+        // Remove directory and all contents (metadata, frames if any)
         fs::remove_dir_all(&metadata.directory_path).await
             .map_err(|e| DoorcamError::component(
                 "event_storage", 
@@ -651,7 +687,7 @@ impl EventStorage {
             registry.events.remove(event_id);
         }
 
-        info!("Deleted event: {} ({} bytes)", event_id, actual_size);
+        info!("Deleted event: {} ({} bytes freed)", event_id, actual_size);
         Ok(actual_size)
     }
 
