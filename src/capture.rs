@@ -514,17 +514,17 @@ impl VideoCapture {
         })?;
 
         // Use hardware H.264 encoding via V4L2 with explicit level setting
+        // Use v4l2jpegdec for hardware-accelerated JPEG decoding on Pi 4
         // Note: Must set h264_level in extra-controls AND output caps level to avoid driver errors
         // Higher quality encoding for 1920x1080:
         // - 8 Mbps bitrate (good quality for Full HD)
-        // - Constant bitrate mode for consistent quality
+        // - Variable bitrate mode for better quality/size ratio
         // - High profile for better compression efficiency
         let pipeline_desc = format!(
             "appsrc name=src format=time is-live=false caps=image/jpeg,framerate=30/1 ! \
-             jpegdec ! \
+             v4l2jpegdec ! \
              videoconvert ! \
-             video/x-raw,format=I420 ! \
-             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=8000000,video_bitrate_mode=1\" ! \
+             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=8000000,video_bitrate_mode=0,repeat_sequence_header=1\" ! \
              video/x-h264,level=(string)4 ! \
              h264parse ! \
              mp4mux ! \
@@ -532,9 +532,9 @@ impl VideoCapture {
             video_path.to_string_lossy()
         );
         
-        let encoder_type = "hardware (v4l2h264enc)";
+        let encoder_type = "hardware (v4l2jpegdec + v4l2h264enc)";
 
-        info!("Creating GStreamer video encoding pipeline using {} encoder", encoder_type);
+        info!("Creating GStreamer video encoding pipeline using {} decoder/encoder", encoder_type);
         debug!("Pipeline: {}", pipeline_desc);
 
         let pipeline = gstreamer::parse::launch(&pipeline_desc)

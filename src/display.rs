@@ -87,14 +87,14 @@ impl DisplayController {
         info!("Using display JPEG decode scale 1/{}", self.config.jpeg_decode_scale);
 
         // Build hardware-accelerated display pipeline with efficient JPEG decoding
-        // Note: jpegdec doesn't support idct-method property, so we decode at full resolution
-        // and then scale down using videoscale for better performance
-        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec");
+        // Use v4l2jpegdec for hardware-accelerated JPEG decoding on Pi 4
+        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! v4l2jpegdec");
         
         // First downsize to pre-rotation dimensions
+        // Use nearest-neighbour scaling for better performance (faster than bilinear)
         pipeline_desc.push_str(&format!(
             " ! videoconvert ! \
-             videoscale ! \
+             videoscale method=nearest-neighbour ! \
              video/x-raw,width={},height={}",
             pre_rotation_width, pre_rotation_height
         ));
