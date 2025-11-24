@@ -88,10 +88,11 @@ impl CameraInterface {
         let device_index = self.config.index;
         
         // Simple MJPEG pipeline - capture JPEG frames directly without decoding
+        // Use io-mode=mmap for efficient memory-mapped I/O
         let pipeline = format!(
-            "v4l2src device=/dev/video{} ! \
+            "v4l2src device=/dev/video{} io-mode=mmap ! \
              image/jpeg,width={},height={},framerate={}/1 ! \
-             appsink name=sink sync=false max-buffers=2 drop=true",
+             appsink name=sink sync=false max-buffers=2 drop=true qos=true emit-signals=false",
             device_index, width, height, fps
         );
         

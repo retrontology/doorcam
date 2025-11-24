@@ -527,7 +527,7 @@ impl VideoCapture {
              v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=8000000,video_bitrate_mode=0,repeat_sequence_header=1\" ! \
              video/x-h264,level=(string)4 ! \
              h264parse ! \
-             mp4mux ! \
+             mp4mux faststart=true ! \
              filesink location={}",
             video_path.to_string_lossy()
         );

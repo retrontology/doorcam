@@ -87,8 +87,9 @@ impl DisplayController {
         info!("Using display JPEG decode scale 1/{}", self.config.jpeg_decode_scale);
 
         // Build hardware-accelerated display pipeline with efficient JPEG decoding
-        // Use v4l2jpegdec for hardware-accelerated JPEG decoding on Pi 4
-        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! v4l2jpegdec");
+        // Note: Using software jpegdec for display - v4l2jpegdec causes pipeline stalls
+        // Hardware decoder works fine for video encoding but not for live display
+        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec");
         
         // First downsize to pre-rotation dimensions
         // Use nearest-neighbour scaling for better performance (faster than bilinear)
