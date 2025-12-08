@@ -1284,15 +1284,23 @@ mod tests {
         let (capture_config, system_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let capture_path = PathBuf::from(&capture_config.path);
+        
+        // Create the capture directory so it exists for validation
+        std::fs::create_dir_all(&capture_path).unwrap();
+        
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
-        // Test validation of capture root (should fail)
+        // Test validation of capture root (should fail - cannot delete root)
         let result = storage.validate_deletion_safety(&capture_path);
-        assert!(result.is_err());
+        assert!(result.is_err(), "Should not allow deleting capture root directory");
 
         // Test validation of path outside capture directory (should fail)
-        let outside_path = PathBuf::from("/tmp/not_capture");
+        // Create a directory outside the capture path
+        let outside_path = PathBuf::from("/tmp/test_outside_capture_dir");
+        std::fs::create_dir_all(&outside_path).unwrap();
         let result = storage.validate_deletion_safety(&outside_path);
-        assert!(result.is_err());
+        assert!(result.is_err(), "Should not allow deleting paths outside capture directory");
+        // Clean up
+        let _ = std::fs::remove_dir(&outside_path);
     }
 }

@@ -49,6 +49,12 @@ pub struct RecoveryManager {
     last_retry_times: std::collections::HashMap<String, Instant>,
 }
 
+impl Default for RecoveryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RecoveryManager {
     /// Create a new recovery manager with default configuration
     pub fn new() -> Self {
@@ -143,6 +149,12 @@ pub struct CameraRecovery {
     recovery_manager: RecoveryManager,
 }
 
+impl Default for CameraRecovery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CameraRecovery {
     pub fn new() -> Self {
         Self {
@@ -235,6 +247,12 @@ impl CameraRecovery {
 /// Touch input recovery strategies
 pub struct TouchRecovery {
     recovery_manager: RecoveryManager,
+}
+
+impl Default for TouchRecovery {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TouchRecovery {
@@ -334,6 +352,12 @@ pub enum ComponentHealth {
     Unknown,
 }
 
+impl Default for HealthMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HealthMonitor {
     /// Create a new health monitor
     pub fn new() -> Self {
@@ -424,6 +448,12 @@ impl HealthMonitor {
 pub struct GracefulDegradation {
     essential_components: std::collections::HashSet<String>,
     optional_components: std::collections::HashSet<String>,
+}
+
+impl Default for GracefulDegradation {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GracefulDegradation {

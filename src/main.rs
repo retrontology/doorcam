@@ -233,72 +233,12 @@ fn init_logging(args: &Args) -> Result<()> {
 /// Print default configuration in TOML format
 fn print_default_config() {
     println!("# Doorcam Configuration File");
-    println!("# This is the default configuration with all available options");
+    println!("# These are the built-in defaults; override in TOML or env vars");
     println!();
-    
-    // Create a default config and serialize it to TOML
-    let default_config = r#"[camera]
-# Camera device index (e.g., 0 for /dev/video0)
-index = 0
-# Camera resolution (width, height)
-resolution = [640, 480]
-# Maximum frames per second
-max_fps = 30
-# Video format (MJPG, YUYV, etc.)
-format = "MJPG"
-# Frame rotation (optional): "Rotate90", "Rotate180", "Rotate270"
-# rotation = "Rotate90"
 
-[analyzer]
-# Maximum FPS for motion analysis
-max_fps = 5
-# Delta threshold for motion detection
-delta_threshold = 25
-# Minimum contour area to trigger motion
-contour_minimum_area = 1000.0
-
-[capture]
-# Preroll duration in seconds
-preroll_seconds = 5
-# Postroll duration in seconds
-postroll_seconds = 10
-# Base path for storing captures
-path = "./captures"
-# Enable timestamp overlay on images
-timestamp_overlay = true
-# Enable video encoding
-video_encoding = false
-# Keep individual JPEG images
-keep_images = true
-
-[stream]
-# IP address to bind to
-ip = "0.0.0.0"
-# Port to listen on
-port = 8080
-
-[display]
-# Framebuffer device path
-framebuffer_device = "/dev/fb0"
-# Backlight control device path
-backlight_device = "/sys/class/backlight/rpi_backlight/brightness"
-# Touch input device path
-touch_device = "/dev/input/event0"
-# Display activation period in seconds
-activation_period_seconds = 30
-# Display rotation (optional): "Rotate90", "Rotate180", "Rotate270"
-# rotation = "Rotate90"
-
-[system]
-# Enable automatic cleanup of old events
-trim_old = true
-# Retention period in days
-retention_days = 7
-# Ring buffer capacity (number of frames)
-ring_buffer_capacity = 150
-# Event bus capacity
-event_bus_capacity = 100
-"#;
-    
-    println!("{}", default_config);
+    let default_config = DoorcamConfig::default();
+    match toml::to_string_pretty(&default_config) {
+        Ok(toml_str) => println!("{}", toml_str),
+        Err(e) => eprintln!("Failed to render default config: {}", e),
+    }
 }

@@ -273,6 +273,7 @@ mod tests {
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
                 hardware_acceleration: true,
+                jpeg_decode_scale: 4,
             },
             capture: CaptureConfig {
                 preroll_seconds: 5,

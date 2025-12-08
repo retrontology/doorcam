@@ -6,7 +6,7 @@ use crate::{
     ring_buffer::RingBuffer,
     wal::{WalWriter, WalReader, delete_wal, find_wal_files},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
@@ -472,7 +472,7 @@ impl VideoCapture {
     /// Extract individual JPEG files from frames
     async fn extract_jpegs_from_frames(
         frames: &[FrameData],
-        capture_dir: &PathBuf,
+        capture_dir: &Path,
         config: &CaptureConfig,
     ) -> Result<()> {
         // Create frames subdirectory
@@ -507,7 +507,7 @@ impl VideoCapture {
 
     /// Create video using GStreamer from frames
     #[cfg(all(feature = "video_encoding", target_os = "linux"))]
-    async fn create_video_gstreamer_from_frames(frames: &[FrameData], video_path: &PathBuf, config: &CaptureConfig) -> Result<()> {
+    async fn create_video_gstreamer_from_frames(frames: &[FrameData], video_path: &Path, config: &CaptureConfig) -> Result<()> {
         // Initialize GStreamer if not already done
         gstreamer::init().map_err(|e| {
             DoorcamError::component("video_capture", &format!("Failed to initialize GStreamer: {}", e))
@@ -943,6 +943,8 @@ mod tests {
     async fn test_capture_completion() {
         let mut config = create_test_config();
         config.postroll_seconds = 1; // Short postroll for testing
+        config.save_metadata = false; // Disable to avoid filesystem issues in tests
+        config.keep_images = false; // Disable to avoid filesystem issues in tests
         
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
@@ -964,7 +966,8 @@ mod tests {
         capture.handle_motion_detected(motion_time).await.unwrap();
 
         // Wait for postroll to complete and task to finalize
-        tokio::time::sleep(Duration::from_millis(1500)).await;
+        // Need to wait for: postroll (1s) + processing time + buffer
+        tokio::time::sleep(Duration::from_millis(2000)).await;
 
         // Check that capture completed
         let stats = capture.get_capture_stats().await;

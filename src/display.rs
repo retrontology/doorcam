@@ -21,7 +21,6 @@ use gstreamer_app::AppSrc;
 /// Display controller for HyperPixel 4.0 with GStreamer hardware acceleration
 pub struct DisplayController {
     config: DisplayConfig,
-    framebuffer: Arc<RwLock<Option<File>>>,
     backlight: Arc<RwLock<Option<File>>>,
     is_active: Arc<AtomicBool>,
     activation_timer: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
@@ -49,7 +48,6 @@ impl DisplayController {
 
         let controller = Self {
             config,
-            framebuffer: Arc::new(RwLock::new(None)),
             backlight: Arc::new(RwLock::new(None)),
             is_active: Arc::new(AtomicBool::new(false)),
             activation_timer: Arc::new(RwLock::new(None)),
@@ -89,7 +87,7 @@ impl DisplayController {
         // Build hardware-accelerated display pipeline with efficient JPEG decoding
         // Note: Using software jpegdec for display - v4l2jpegdec causes pipeline stalls
         // Hardware decoder works fine for video encoding but not for live display
-        let mut pipeline_desc = format!("appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec");
+        let mut pipeline_desc = "appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec".to_string();
         
         // First downsize to pre-rotation dimensions
         // Use nearest-neighbour scaling for better performance (faster than bilinear)
@@ -176,21 +174,8 @@ impl DisplayController {
         Ok(())
     }
 
-    /// Initialize framebuffer and backlight device connections
+    /// Initialize backlight device connection
     async fn initialize_devices(&self) -> Result<()> {
-        // Initialize framebuffer
-        match self.open_framebuffer().await {
-            Ok(fb) => {
-                let mut framebuffer = self.framebuffer.write().await;
-                *framebuffer = Some(fb);
-                info!("Framebuffer device opened: {}", self.config.framebuffer_device);
-            }
-            Err(e) => {
-                warn!("Failed to open framebuffer device {}: {}", self.config.framebuffer_device, e);
-                // Continue without framebuffer - will be retried later
-            }
-        }
-
         // Initialize backlight
         match self.open_backlight().await {
             Ok(bl) => {
@@ -205,17 +190,6 @@ impl DisplayController {
         }
 
         Ok(())
-    }
-
-    /// Open framebuffer device for writing
-    async fn open_framebuffer(&self) -> Result<File> {
-        Ok(OpenOptions::new()
-            .write(true)
-            .open(&self.config.framebuffer_device)
-            .map_err(|e| DisplayError::FramebufferOpen {
-                device: self.config.framebuffer_device.clone(),
-                source: e,
-            })?)
     }
 
     /// Open backlight device for writing
@@ -330,7 +304,7 @@ impl DisplayController {
 
         // Start new deactivation timer
         let is_active = Arc::clone(&self.is_active);
-        let event_bus_clone = Arc::clone(&event_bus);
+        let event_bus_clone = Arc::clone(event_bus);
         let duration = Duration::from_secs(duration_seconds as u64);
 
         let timer_handle = tokio::spawn(async move {
@@ -449,17 +423,12 @@ impl DisplayController {
 
         #[cfg(all(feature = "display", target_os = "linux"))]
         {
-            // Use GStreamer pipeline for hardware-accelerated rendering
-            if let Err(e) = self.render_frame_gstreamer(frame).await {
-                warn!("GStreamer rendering failed, falling back to framebuffer: {}", e);
-                self.render_frame_fallback(frame).await?;
-            }
+            self.render_frame_gstreamer(frame).await?;
         }
 
         #[cfg(not(all(feature = "display", target_os = "linux")))]
         {
-            // Fallback to direct framebuffer rendering
-            self.render_frame_fallback(frame).await?;
+            warn!("Display rendering not available without GStreamer on Linux");
         }
 
         Ok(())
@@ -488,10 +457,8 @@ impl DisplayController {
                     frame.data.as_ref().clone()
                 }
                 _ => {
-                    // Convert to JPEG first (placeholder - would use actual conversion)
-                    warn!("Non-MJPEG frame format {:?} not yet supported for GStreamer display", frame.format);
                     return Err(DisplayError::Framebuffer {
-                        details: "Only MJPEG frames supported for GStreamer display".to_string(),
+                        details: format!("Only MJPEG frames supported for GStreamer display, got {:?}", frame.format),
                     }.into());
                 }
             };
@@ -529,135 +496,6 @@ impl DisplayController {
         }
     }
 
-    /// Fallback framebuffer rendering (original implementation)
-    async fn render_frame_fallback(&self, frame: &FrameData) -> Result<()> {
-        let mut framebuffer = self.framebuffer.write().await;
-        
-        if let Some(ref mut fb_file) = *framebuffer {
-            // Convert frame to display format
-            let display_data = self.convert_frame_for_display(frame).await?;
-            
-            // Write to framebuffer
-            fb_file.seek(SeekFrom::Start(0))
-                .map_err(|e| DisplayError::Framebuffer { 
-                    details: format!("Failed to seek framebuffer: {}", e) 
-                })?;
-            
-            fb_file.write_all(&display_data)
-                .map_err(|e| DisplayError::Framebuffer { 
-                    details: format!("Failed to write framebuffer: {}", e) 
-                })?;
-            
-            fb_file.flush()
-                .map_err(|e| DisplayError::Framebuffer { 
-                    details: format!("Failed to flush framebuffer: {}", e) 
-                })?;
-            
-            debug!("Frame {} rendered to framebuffer (fallback)", frame.id);
-        } else {
-            // Try to reinitialize framebuffer
-            match self.open_framebuffer().await {
-                Ok(fb) => {
-                    *framebuffer = Some(fb);
-                    debug!("Framebuffer device reconnected");
-                    // Retry the operation once
-                    drop(framebuffer);
-                    let mut framebuffer_retry = self.framebuffer.write().await;
-                    if let Some(ref mut fb_file) = *framebuffer_retry {
-                        let display_data = self.convert_frame_for_display(frame).await?;
-                        
-                        fb_file.seek(SeekFrom::Start(0))
-                            .map_err(|e| DisplayError::Framebuffer { 
-                                details: format!("Failed to seek framebuffer: {}", e) 
-                            })?;
-                        
-                        fb_file.write_all(&display_data)
-                            .map_err(|e| DisplayError::Framebuffer { 
-                                details: format!("Failed to write framebuffer: {}", e) 
-                            })?;
-                        
-                        fb_file.flush()
-                            .map_err(|e| DisplayError::Framebuffer { 
-                                details: format!("Failed to flush framebuffer: {}", e) 
-                            })?;
-                        
-                        debug!("Frame {} rendered to framebuffer (fallback retry)", frame.id);
-                    }
-                }
-                Err(e) => {
-                    warn!("Framebuffer unavailable for rendering: {}", e);
-                }
-            }
-        }
-        
-        Ok(())
-    }
-
-    /// Convert frame data to display format (RGB565 for HyperPixel 4.0)
-    async fn convert_frame_for_display(&self, frame: &FrameData) -> Result<Vec<u8>> {
-        // Use configured display resolution to prevent "File too large" errors
-        let display_width = self.config.resolution.0;
-        let display_height = self.config.resolution.1;
-        
-        debug!("Converting frame {}x{} to display {}x{}", 
-               frame.width, frame.height, display_width, display_height);
-        
-        match frame.format {
-            FrameFormat::Mjpeg => {
-                // For MJPEG, we would need to decode first, then convert to RGB565
-                // For now, return a placeholder pattern at display resolution
-                debug!("MJPEG frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(display_width, display_height).await
-            }
-            FrameFormat::Yuyv => {
-                // Convert YUYV to RGB565 at display resolution
-                debug!("YUYV frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(display_width, display_height).await
-            }
-            FrameFormat::Rgb24 => {
-                // Convert RGB24 to RGB565 at display resolution
-                debug!("RGB24 frame conversion for display - placeholder implementation");
-                self.create_placeholder_display_data(display_width, display_height).await
-            }
-        }
-    }
-
-    /// Create placeholder display data for testing
-    async fn create_placeholder_display_data(&self, width: u32, height: u32) -> Result<Vec<u8>> {
-        // Ensure we use the configured display resolution to prevent buffer overruns
-        let display_width = self.config.resolution.0;
-        let display_height = self.config.resolution.1;
-        
-        // Use the smaller of requested size or display size to prevent "File too large" errors
-        let actual_width = width.min(display_width);
-        let actual_height = height.min(display_height);
-        
-        debug!("Creating display data for {}x{} (requested {}x{}, display {}x{})", 
-               actual_width, actual_height, width, height, display_width, display_height);
-        
-        // Create RGB565 format data (2 bytes per pixel)
-        let pixel_count = (actual_width * actual_height) as usize;
-        let mut data = Vec::with_capacity(pixel_count * 2);
-        
-        // Create a simple gradient pattern
-        for y in 0..actual_height {
-            for x in 0..actual_width {
-                // Create RGB565 pixel (5 bits red, 6 bits green, 5 bits blue)
-                let r = ((x * 31) / actual_width) as u16;  // 5 bits
-                let g = ((y * 63) / actual_height) as u16; // 6 bits
-                let b = (((x + y) * 31) / (actual_width + actual_height)) as u16; // 5 bits
-                
-                let rgb565 = (r << 11) | (g << 5) | b;
-                
-                // Write as little-endian bytes
-                data.push((rgb565 & 0xFF) as u8);
-                data.push((rgb565 >> 8) as u8);
-            }
-        }
-        
-        Ok(data)
-    }
-
     /// Check if display is currently active
     pub fn is_active(&self) -> bool {
         self.is_active.load(Ordering::Relaxed)
@@ -672,7 +510,6 @@ impl DisplayController {
     fn clone_for_task(&self) -> Self {
         Self {
             config: self.config.clone(),
-            framebuffer: Arc::clone(&self.framebuffer),
             backlight: Arc::clone(&self.backlight),
             is_active: Arc::clone(&self.is_active),
             activation_timer: Arc::clone(&self.activation_timer),
@@ -696,6 +533,30 @@ impl Clone for DisplayController {
 pub struct DisplayConverter;
 
 impl DisplayConverter {
+    /// Create placeholder RGB565 data for testing
+    pub fn create_placeholder_rgb565(width: u32, height: u32) -> Result<Vec<u8>> {
+        let pixel_count = (width * height) as usize;
+        let mut data = Vec::with_capacity(pixel_count * 2);
+        
+        // Create a simple gradient pattern
+        for y in 0..height {
+            for x in 0..width {
+                // Create RGB565 pixel (5 bits red, 6 bits green, 5 bits blue)
+                let r = ((x * 31) / width) as u16;  // 5 bits
+                let g = ((y * 63) / height) as u16; // 6 bits
+                let b = (((x + y) * 31) / (width + height)) as u16; // 5 bits
+                
+                let rgb565 = (r << 11) | (g << 5) | b;
+                
+                // Write as little-endian bytes
+                data.push((rgb565 & 0xFF) as u8);
+                data.push((rgb565 >> 8) as u8);
+            }
+        }
+        
+        Ok(data)
+    }
+
     /// Convert RGB24 to RGB565 format with optional scaling
     pub fn rgb24_to_rgb565(rgb24_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         let expected_size = (width * height * 3) as usize;
@@ -857,9 +718,10 @@ mod tests {
     #[tokio::test]
     async fn test_placeholder_display_data() {
         let config = create_test_config();
-        let controller = DisplayController::new(config).await.unwrap();
+        let _controller = DisplayController::new(config).await.unwrap();
         
-        let data = controller.create_placeholder_display_data(320, 240).await.unwrap();
+        // Test the DisplayConverter utility directly
+        let data = DisplayConverter::create_placeholder_rgb565(320, 240).unwrap();
         
         // Should be 2 bytes per pixel for RGB565
         assert_eq!(data.len(), 320 * 240 * 2);
@@ -894,9 +756,9 @@ mod tests {
     #[tokio::test]
     async fn test_frame_conversion() {
         let config = create_test_config();
-        let controller = DisplayController::new(config).await.unwrap();
+        let _controller = DisplayController::new(config).await.unwrap();
         
-        let frame = FrameData::new(
+        let _frame = FrameData::new(
             1,
             SystemTime::now(),
             vec![0u8; 100],
@@ -905,10 +767,12 @@ mod tests {
             FrameFormat::Mjpeg,
         );
         
-        let display_data = controller.convert_frame_for_display(&frame).await.unwrap();
+        // Test RGB565 conversion directly
+        let rgb24_data = vec![255u8; 320 * 240 * 3];
+        let display_data = DisplayConverter::rgb24_to_rgb565(&rgb24_data, 320, 240).unwrap();
         
-        // Should produce RGB565 data at display resolution (800x480)
-        assert_eq!(display_data.len(), 800 * 480 * 2);
+        // Should produce RGB565 data (2 bytes per pixel)
+        assert_eq!(display_data.len(), 320 * 240 * 2);
     }
 
     #[test]

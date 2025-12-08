@@ -199,7 +199,7 @@ impl WalReader {
             .map_err(|e| DoorcamError::component("wal", &format!("Failed to read WAL header: {}", e)))?;
         
         // Validate magic number
-        if &header[0..4] != &WAL_MAGIC {
+        if header[0..4] != WAL_MAGIC {
             return Err(DoorcamError::component("wal", "Invalid WAL file: bad magic number"));
         }
         

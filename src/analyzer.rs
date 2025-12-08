@@ -432,8 +432,8 @@ impl MotionAnalyzer {
     /// Convert YUYV frame to grayscale
     #[cfg(feature = "motion_analysis")]
     fn yuyv_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
-        let width = frame.width as u32;
-        let height = frame.height as u32;
+        let width = frame.width;
+        let height = frame.height;
         let mut gray_image = GrayImage::new(width, height);
         
         // YUYV format: Y0 U Y1 V (4 bytes for 2 pixels)
@@ -458,8 +458,8 @@ impl MotionAnalyzer {
     /// Convert RGB24 frame to grayscale
     #[cfg(feature = "motion_analysis")]
     fn rgb24_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
-        let width = frame.width as u32;
-        let height = frame.height as u32;
+        let width = frame.width;
+        let height = frame.height;
         
         // Create RGB image from raw data
         let rgb_image = RgbImage::from_raw(width, height, frame.data.to_vec())
@@ -485,7 +485,7 @@ impl MotionAnalyzer {
         
         for (x, y, bg_pixel) in background.enumerate_pixels() {
             if let Some(curr_pixel) = current.get_pixel_checked(x, y) {
-                let diff = (bg_pixel[0] as i16 - curr_pixel[0] as i16).abs() as u8;
+                let diff = (bg_pixel[0] as i16 - curr_pixel[0] as i16).unsigned_abs() as u8;
                 diff_image.put_pixel(x, y, Luma([diff]));
             }
         }

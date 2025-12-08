@@ -20,7 +20,7 @@ use gstreamer_video::VideoInfo;
 /// GStreamer-based camera interface with hardware acceleration support
 pub struct CameraInterface {
     config: CameraConfig,
-    frame_counter: AtomicU64,
+    frame_counter: Arc<AtomicU64>,
     is_running: Arc<AtomicBool>,
     #[cfg(all(feature = "camera", target_os = "linux"))]
     pipeline: Option<Pipeline>,
@@ -47,7 +47,7 @@ impl CameraInterface {
         
         let mut camera = Self {
             config,
-            frame_counter: AtomicU64::new(0),
+            frame_counter: Arc::new(AtomicU64::new(0)),
             is_running: Arc::new(AtomicBool::new(false)),
             #[cfg(all(feature = "camera", target_os = "linux"))]
             pipeline: None,
@@ -140,7 +140,7 @@ impl CameraInterface {
     async fn run_gst_capture_loop(&self, pipeline: Pipeline, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let is_running = Arc::clone(&self.is_running);
         let capture_task = Arc::clone(&self.capture_task);
-        let frame_counter = AtomicU64::new(0);
+        let frame_counter = Arc::clone(&self.frame_counter);
         
         let task = tokio::spawn(async move {
             // Get the appsink element
@@ -204,7 +204,7 @@ impl CameraInterface {
     #[cfg(all(feature = "camera", target_os = "linux"))]
     async fn process_gst_sample(
         sample: gstreamer::Sample,
-        frame_counter: &AtomicU64,
+        frame_counter: &Arc<AtomicU64>,
         ring_buffer: &Arc<RingBuffer>,
     ) -> Result<()> {
         let buffer = sample.buffer().ok_or_else(|| {
@@ -269,9 +269,9 @@ impl CameraInterface {
         let config = self.config.clone();
         let is_running = Arc::clone(&self.is_running);
         let capture_task = Arc::clone(&self.capture_task);
+        let frame_counter = Arc::clone(&self.frame_counter);
         
         let task = tokio::spawn(async move {
-            let frame_counter = AtomicU64::new(0);
             let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
             let mut interval_timer = tokio::time::interval(frame_interval);
             

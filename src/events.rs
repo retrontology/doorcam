@@ -431,6 +431,12 @@ pub struct EventRoute {
     pub handler: Box<dyn Fn(DoorcamEvent) -> tokio::task::JoinHandle<()> + Send + Sync>,
 }
 
+impl Default for EventRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventRouter {
     /// Create a new event router
     pub fn new() -> Self {

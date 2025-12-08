@@ -185,7 +185,7 @@ async fn mjpeg_stream_handler(
             }
 
             // Log streaming statistics periodically
-            if frames_streamed > 0 && frames_streamed % 100 == 0 {
+            if frames_streamed > 0 && frames_streamed.is_multiple_of(100) {
                 let elapsed = stream_start.elapsed();
                 let fps = frames_streamed as f64 / elapsed.as_secs_f64();
                 let mbps = (bytes_streamed as f64 / elapsed.as_secs_f64()) / 1_048_576.0;
@@ -414,25 +414,13 @@ impl Default for StreamServerBuilder {
 }
 
 /// Stream server statistics and monitoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StreamStats {
     pub active_connections: u32,
     pub total_connections: u64,
     pub frames_streamed: u64,
     pub bytes_streamed: u64,
     pub errors: u64,
-}
-
-impl Default for StreamStats {
-    fn default() -> Self {
-        Self {
-            active_connections: 0,
-            total_connections: 0,
-            frames_streamed: 0,
-            bytes_streamed: 0,
-            errors: 0,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -499,7 +487,7 @@ mod tests {
         let result = prepare_frame_for_streaming(&frame).await.unwrap();
         
         // Should return placeholder JPEG (starts with JPEG SOI marker)
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
         assert_eq!(result[0], 0xFF);
         assert_eq!(result[1], 0xD8);
         // Should end with EOI marker
@@ -514,7 +502,7 @@ mod tests {
         let result = prepare_frame_for_streaming(&frame).await.unwrap();
         
         // Should return placeholder JPEG (starts with JPEG SOI marker)
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
         assert_eq!(result[0], 0xFF);
         assert_eq!(result[1], 0xD8);
         // Should end with EOI marker
@@ -588,6 +576,6 @@ mod tests {
         // Test frame preparation
         let latest_frame = ring_buffer.get_latest_frame().await.unwrap();
         let jpeg_data = prepare_frame_for_streaming(&latest_frame).await.unwrap();
-        assert!(jpeg_data.len() > 0);
+        assert!(!jpeg_data.is_empty());
     }
 }

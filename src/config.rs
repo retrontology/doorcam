@@ -254,6 +254,57 @@ impl DoorcamConfig {
     }
 }
 
+impl Default for DoorcamConfig {
+    fn default() -> Self {
+        Self {
+            camera: CameraConfig {
+                index: default_camera_index(),
+                resolution: default_camera_resolution(),
+                max_fps: default_camera_fps(),
+                format: default_camera_format(),
+                rotation: None,
+            },
+            analyzer: AnalyzerConfig {
+                max_fps: default_analyzer_fps(),
+                delta_threshold: default_delta_threshold(),
+                contour_minimum_area: default_contour_area(),
+                hardware_acceleration: default_hardware_acceleration(),
+                jpeg_decode_scale: default_jpeg_decode_scale(),
+            },
+            capture: CaptureConfig {
+                preroll_seconds: default_preroll_seconds(),
+                postroll_seconds: default_postroll_seconds(),
+                path: default_capture_path(),
+                timestamp_overlay: default_timestamp_overlay(),
+                timestamp_font_path: default_timestamp_font_path(),
+                timestamp_font_size: default_timestamp_font_size(),
+                video_encoding: default_video_encoding(),
+                keep_images: default_keep_images(),
+                save_metadata: default_save_metadata(),
+            },
+            stream: StreamConfig {
+                ip: default_stream_ip(),
+                port: default_stream_port(),
+            },
+            display: DisplayConfig {
+                framebuffer_device: default_framebuffer_device(),
+                backlight_device: default_backlight_device(),
+                touch_device: default_touch_device(),
+                activation_period_seconds: default_activation_period(),
+                resolution: default_display_resolution(),
+                rotation: None,
+                jpeg_decode_scale: default_display_jpeg_decode_scale(),
+            },
+            system: SystemConfig {
+                trim_old: default_trim_old(),
+                retention_days: default_retention_days(),
+                ring_buffer_capacity: default_ring_buffer_capacity(),
+                event_bus_capacity: default_event_bus_capacity(),
+            },
+        }
+    }
+}
+
 // Default value functions
 fn default_camera_index() -> u32 { 0 }
 fn default_camera_resolution() -> (u32, u32) { (640, 480) }
@@ -272,7 +323,7 @@ fn default_capture_path() -> String { "./captures".to_string() }
 fn default_timestamp_overlay() -> bool { true }
 fn default_timestamp_font_path() -> String { "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string() }
 fn default_timestamp_font_size() -> f32 { 24.0 }
-fn default_video_encoding() -> bool { false }
+fn default_video_encoding() -> bool { true }
 fn default_keep_images() -> bool { false }
 fn default_save_metadata() -> bool { false }
 

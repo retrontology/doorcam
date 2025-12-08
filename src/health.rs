@@ -239,6 +239,12 @@ pub struct SystemMetrics {
     last_reset: Instant,
 }
 
+impl Default for SystemMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemMetrics {
     /// Create a new system metrics collector
     pub fn new() -> Self {
