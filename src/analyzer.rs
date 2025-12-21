@@ -49,6 +49,8 @@ pub struct MotionAnalyzer {
     appsrc: Option<AppSrc>,
     #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
     appsink: Option<AppSink>,
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    preprocessing_dims: Option<(u32, u32)>,
 }
 
 impl MotionAnalyzer {
@@ -66,7 +68,7 @@ impl MotionAnalyzer {
                 }
             }
 
-            let mut analyzer = Self {
+            let analyzer = Self {
                 config,
                 background_model: None,
                 frame_count: 0,
@@ -76,15 +78,9 @@ impl MotionAnalyzer {
                 appsrc: None,
                 #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
                 appsink: None,
+                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+                preprocessing_dims: None,
             };
-
-            #[cfg(target_os = "linux")]
-            {
-                if let Err(e) = analyzer.initialize_preprocessing_pipeline().await {
-                    warn!("Failed to initialize GStreamer preprocessing pipeline: {}", e);
-                    info!("Falling back to direct image processing");
-                }
-            }
 
             info!("Motion analyzer initialized successfully");
             Ok(analyzer)
@@ -103,14 +99,13 @@ impl MotionAnalyzer {
         }
     }
 
-    /// Initialize GStreamer preprocessing pipeline for motion analysis
+    /// Initialize GStreamer preprocessing pipeline for motion analysis with target dimensions
     #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-    async fn initialize_preprocessing_pipeline(&mut self) -> Result<()> {
-        // Calculate target resolution based on decode scale configuration
-        let target_width = 320;  // Base resolution for motion analysis
-        let target_height = 240;
-        
-        info!("Using JPEG decode scale 1/{}", self.config.jpeg_decode_scale);
+    fn initialize_preprocessing_pipeline(&mut self, target_width: u32, target_height: u32) -> Result<()> {
+        info!(
+            "Initializing GStreamer pipeline for motion analysis at {}x{} (scale 1/{})",
+            target_width, target_height, self.config.jpeg_decode_scale
+        );
         
         // Define hardware pipeline with direct downscaling if supported
         let hw_pipeline_desc = format!(
@@ -137,7 +132,6 @@ impl MotionAnalyzer {
         );
 
         // Choose pipeline based on configuration and availability
-        info!("Initializing GStreamer pipeline for motion analysis");
         let (pipeline, _use_hw) = if self.config.hardware_acceleration {
             debug!("Attempting hardware-accelerated motion analysis pipeline: {}", hw_pipeline_desc);
             
@@ -207,9 +201,28 @@ impl MotionAnalyzer {
         self.preprocessing_pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
         self.appsink = Some(appsink);
+        self.preprocessing_dims = Some((target_width, target_height));
 
         info!("GStreamer preprocessing pipeline initialized for motion analysis");
         Ok(())
+    }
+
+    /// Ensure preprocessing pipeline is available and sized correctly
+    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    fn ensure_preprocessing_pipeline(&mut self, target_width: u32, target_height: u32) -> Result<()> {
+        if let Some((w, h)) = self.preprocessing_dims {
+            if w == target_width && h == target_height
+                && self.preprocessing_pipeline.is_some()
+                && self.appsrc.is_some()
+                && self.appsink.is_some()
+            {
+                return Ok(());
+            }
+        }
+
+        // Rebuild to match the requested dimensions
+        self.cleanup();
+        self.initialize_preprocessing_pipeline(target_width, target_height)
     }
     
     /// Analyze a single frame for motion (async wrapper)
@@ -327,11 +340,11 @@ impl MotionAnalyzer {
     
     /// Convert frame data to grayscale image using GStreamer preprocessing when available
     #[cfg(feature = "motion_analysis")]
-    fn frame_to_gray_image(&self, frame: &FrameData) -> Result<GrayImage> {
+    fn frame_to_gray_image(&mut self, frame: &FrameData) -> Result<GrayImage> {
         #[cfg(target_os = "linux")]
         {
             // Try GStreamer preprocessing first for MJPEG frames
-            if frame.format == FrameFormat::Mjpeg && self.preprocessing_pipeline.is_some() {
+            if frame.format == FrameFormat::Mjpeg {
                 if let Ok(gray_image) = self.frame_to_gray_gstreamer(frame) {
                     return Ok(gray_image);
                 } else {
@@ -363,7 +376,21 @@ impl MotionAnalyzer {
 
     /// Convert MJPEG frame to grayscale using GStreamer preprocessing
     #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-    fn frame_to_gray_gstreamer(&self, frame: &FrameData) -> Result<GrayImage> {
+    fn frame_to_gray_gstreamer(&mut self, frame: &FrameData) -> Result<GrayImage> {
+        let scale = std::cmp::max(1, self.config.jpeg_decode_scale);
+        let mut target_width = std::cmp::max(1, frame.width / scale);
+        let mut target_height = std::cmp::max(1, frame.height / scale);
+
+        // Align to even dimensions for better pipeline compatibility
+        if target_width % 2 != 0 && target_width > 1 {
+            target_width -= 1;
+        }
+        if target_height % 2 != 0 && target_height > 1 {
+            target_height -= 1;
+        }
+
+        self.ensure_preprocessing_pipeline(target_width, target_height)?;
+
         if let (Some(appsrc), Some(appsink)) = (&self.appsrc, &self.appsink) {
             // Create GStreamer buffer from JPEG data
             let mut buffer = gstreamer::Buffer::with_size(frame.data.len())
@@ -407,15 +434,16 @@ impl MotionAnalyzer {
                     }
                 })?;
 
-                // Create grayscale image from processed data (320x240 GRAY8)
-                // This is 1/4 resolution for efficient motion analysis
-                let gray_image = GrayImage::from_raw(320, 240, map.as_slice().to_vec())
+                // Create grayscale image from processed data at the scaled resolution
+                let gray_image = GrayImage::from_raw(target_width, target_height, map.as_slice().to_vec())
                     .ok_or_else(|| AnalyzerError::FrameProcessing {
                         details: "Failed to create grayscale image from processed data".to_string(),
                     })?;
 
-                debug!("Successfully preprocessed frame {} using GStreamer 1/{} resolution decode (320x240)", 
-                       frame.id, self.config.jpeg_decode_scale);
+                debug!(
+                    "Successfully preprocessed frame {} using GStreamer 1/{} resolution decode ({}x{})", 
+                    frame.id, self.config.jpeg_decode_scale, target_width, target_height
+                );
                 return Ok(gray_image);
             } else {
                 return Err(AnalyzerError::FrameProcessing {
@@ -548,6 +576,7 @@ impl MotionAnalyzer {
         self.preprocessing_pipeline = None;
         self.appsrc = None;
         self.appsink = None;
+        self.preprocessing_dims = None;
         debug!("GStreamer preprocessing pipeline cleaned up");
     }
 
