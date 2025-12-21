@@ -27,9 +27,9 @@ pub struct CameraConfig {
     #[serde(default = "default_camera_resolution")]
     pub resolution: (u32, u32),
     
-    /// Maximum frames per second
+    /// Frames per second
     #[serde(default = "default_camera_fps")]
-    pub max_fps: u32,
+    pub fps: u32,
     
     /// Video format (MJPG, YUYV, etc.)
     #[serde(default = "default_camera_format")]
@@ -41,9 +41,9 @@ pub struct CameraConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AnalyzerConfig {
-    /// Maximum FPS for motion analysis
+    /// FPS for motion analysis
     #[serde(default = "default_analyzer_fps")]
-    pub max_fps: u32,
+    pub fps: u32,
     
     /// Delta threshold for motion detection
     #[serde(default = "default_delta_threshold")]
@@ -183,9 +183,9 @@ impl DoorcamConfig {
             // Start with default values
             .set_default("camera.index", default_camera_index())?
             .set_default("camera.resolution", vec![default_camera_resolution().0, default_camera_resolution().1])?
-            .set_default("camera.max_fps", default_camera_fps())?
+            .set_default("camera.fps", default_camera_fps())?
             .set_default("camera.format", default_camera_format())?
-            .set_default("analyzer.max_fps", default_analyzer_fps())?
+            .set_default("analyzer.fps", default_analyzer_fps())?
             .set_default("analyzer.delta_threshold", default_delta_threshold())?
             .set_default("analyzer.contour_minimum_area", default_contour_area())?
             .set_default("analyzer.hardware_acceleration", default_hardware_acceleration())?
@@ -232,13 +232,13 @@ impl DoorcamConfig {
             return Err(ConfigError::Message("Camera resolution must be greater than 0".to_string()));
         }
         
-        if self.camera.max_fps == 0 {
-            return Err(ConfigError::Message("Camera max_fps must be greater than 0".to_string()));
+        if self.camera.fps == 0 {
+            return Err(ConfigError::Message("Camera fps must be greater than 0".to_string()));
         }
 
         // Validate analyzer settings
-        if self.analyzer.max_fps == 0 {
-            return Err(ConfigError::Message("Analyzer max_fps must be greater than 0".to_string()));
+        if self.analyzer.fps == 0 {
+            return Err(ConfigError::Message("Analyzer fps must be greater than 0".to_string()));
         }
 
         // Validate system settings
@@ -260,12 +260,12 @@ impl Default for DoorcamConfig {
             camera: CameraConfig {
                 index: default_camera_index(),
                 resolution: default_camera_resolution(),
-                max_fps: default_camera_fps(),
+                fps: default_camera_fps(),
                 format: default_camera_format(),
                 rotation: None,
             },
             analyzer: AnalyzerConfig {
-                max_fps: default_analyzer_fps(),
+                fps: default_analyzer_fps(),
                 delta_threshold: default_delta_threshold(),
                 contour_minimum_area: default_contour_area(),
                 hardware_acceleration: default_hardware_acceleration(),
@@ -353,12 +353,12 @@ mod tests {
             camera: CameraConfig {
                 index: default_camera_index(),
                 resolution: default_camera_resolution(),
-                max_fps: default_camera_fps(),
+                fps: default_camera_fps(),
                 format: default_camera_format(),
                 rotation: None,
             },
             analyzer: AnalyzerConfig {
-                max_fps: default_analyzer_fps(),
+                fps: default_analyzer_fps(),
                 delta_threshold: default_delta_threshold(),
                 contour_minimum_area: default_contour_area(),
                 hardware_acceleration: default_hardware_acceleration(),
@@ -420,12 +420,12 @@ mod tests {
             camera: CameraConfig {
                 index: 0,
                 resolution: (0, 0), // Invalid resolution
-                max_fps: 30,
+                fps: 30,
                 format: "MJPG".to_string(),
                 rotation: None,
             },
             analyzer: AnalyzerConfig {
-                max_fps: 5,
+                fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
                 hardware_acceleration: true,

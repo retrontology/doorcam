@@ -54,12 +54,12 @@ mod tests {
             camera: crate::config::CameraConfig {
                 index: 0,
                 resolution: (640, 480),
-                max_fps: 30,
+                fps: 30,
                 format: "MJPG".to_string(),
                 rotation: None,
             },
             analyzer: crate::config::AnalyzerConfig {
-                max_fps: 5,
+                fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
                 hardware_acceleration: true,

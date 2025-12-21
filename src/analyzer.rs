@@ -595,7 +595,7 @@ mod tests {
     #[tokio::test]
     async fn test_motion_analyzer_creation() {
         let config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -606,14 +606,14 @@ mod tests {
         assert!(analyzer.is_ok());
         
         let analyzer = analyzer.unwrap();
-        assert_eq!(analyzer.config().max_fps, 5);
+        assert_eq!(analyzer.config().fps, 5);
         assert_eq!(analyzer.config().contour_minimum_area, 1000.0);
     }
     
     #[tokio::test]
     async fn test_config_update() {
         let initial_config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -623,7 +623,7 @@ mod tests {
         let mut analyzer = MotionAnalyzer::new(initial_config).await.unwrap();
         
         let new_config = AnalyzerConfig {
-            max_fps: 10,
+            fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
             hardware_acceleration: false,
@@ -631,7 +631,7 @@ mod tests {
         };
         
         analyzer.update_config(new_config);
-        assert_eq!(analyzer.config().max_fps, 10);
+        assert_eq!(analyzer.config().fps, 10);
         assert_eq!(analyzer.config().contour_minimum_area, 2000.0);
     }
     
@@ -639,7 +639,7 @@ mod tests {
     #[tokio::test]
     async fn test_motion_detection_with_synthetic_frame() {
         let config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 100.0,
             hardware_acceleration: false, // Disable for synthetic test

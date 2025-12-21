@@ -16,6 +16,7 @@ pub struct StreamingIntegration {
     event_bus: Arc<EventBus>,
     config: StreamConfig,
     stats: StreamingStats,
+    target_fps: u32,
 }
 
 /// Statistics for streaming performance monitoring
@@ -70,12 +71,14 @@ impl StreamingIntegration {
         config: StreamConfig,
         ring_buffer: Arc<RingBuffer>,
         event_bus: Arc<EventBus>,
+        target_fps: u32,
     ) -> Result<Self> {
         Ok(Self {
             ring_buffer,
             event_bus,
             config,
             stats: StreamingStats::default(),
+            target_fps,
         })
     }
 
@@ -89,6 +92,7 @@ impl StreamingIntegration {
                 self.config.clone(),
                 Arc::clone(&self.ring_buffer),
                 Arc::clone(&self.event_bus),
+                self.target_fps,
             );
             
             tokio::spawn(async move {
@@ -374,7 +378,7 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
         let event_bus = Arc::new(EventBus::new(10));
 
-        let integration = StreamingIntegration::new(config, ring_buffer, event_bus);
+        let integration = StreamingIntegration::new(config, ring_buffer, event_bus, 30);
         assert!(integration.is_ok());
     }
 
@@ -430,7 +434,7 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
         let event_bus = Arc::new(EventBus::new(10));
 
-        let integration = StreamingIntegration::new(config, ring_buffer, event_bus).unwrap();
+        let integration = StreamingIntegration::new(config, ring_buffer, event_bus, 30).unwrap();
         
         // Should not be healthy initially (no frames processed)
         assert!(!integration.is_healthy());

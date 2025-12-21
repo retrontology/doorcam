@@ -32,7 +32,7 @@ impl CameraInterface {
     pub async fn new(config: CameraConfig) -> Result<Self> {
         info!(
             "Initializing GStreamer camera interface for device {} ({}x{} @ {}fps)",
-            config.index, config.resolution.0, config.resolution.1, config.max_fps
+            config.index, config.resolution.0, config.resolution.1, config.fps
         );
         
         #[cfg(all(feature = "camera", target_os = "linux"))]
@@ -84,15 +84,16 @@ impl CameraInterface {
     #[cfg(all(feature = "camera", target_os = "linux"))]
     fn build_pipeline_string(&self) -> Result<String> {
         let (width, height) = self.config.resolution;
-        let fps = self.config.max_fps;
+        let fps = self.config.fps;
         let device_index = self.config.index;
         
         // Simple MJPEG pipeline - capture JPEG frames directly without decoding
         // Use io-mode=mmap for efficient memory-mapped I/O
         let pipeline = format!(
-            "v4l2src device=/dev/video{} io-mode=mmap ! \
+            "v4l2src device=/dev/video{} io-mode=mmap do-timestamp=true ! \
              image/jpeg,width={},height={},framerate={}/1 ! \
-             appsink name=sink sync=false max-buffers=2 drop=true qos=true emit-signals=false",
+             queue max-size-buffers=4 leaky=downstream ! \
+             appsink name=sink sync=false max-buffers=10 drop=false qos=false enable-last-sample=false emit-signals=false",
             device_index, width, height, fps
         );
         
@@ -272,7 +273,7 @@ impl CameraInterface {
         let frame_counter = Arc::clone(&self.frame_counter);
         
         let task = tokio::spawn(async move {
-            let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
+            let frame_interval = Duration::from_millis(1000 / config.fps as u64);
             let mut interval_timer = tokio::time::interval(frame_interval);
             
             info!("Mock GStreamer capture loop started");
@@ -448,7 +449,7 @@ mod tests {
         CameraConfig {
             index: 0,
             resolution: (640, 480),
-            max_fps: 30,
+            fps: 30,
             format: "MJPG".to_string(),
             rotation: None,
         }
@@ -542,7 +543,7 @@ mod tests {
         let config = CameraConfig {
             index: 0,
             resolution: (640, 480),
-            max_fps: 30,
+            fps: 30,
             format: "MJPG".to_string(),
             rotation: None,
         };
@@ -550,7 +551,7 @@ mod tests {
         // Basic validation - config should be valid
         assert_eq!(config.index, 0);
         assert_eq!(config.resolution, (640, 480));
-        assert_eq!(config.max_fps, 30);
+        assert_eq!(config.fps, 30);
         assert_eq!(config.format, "MJPG");
         assert!(config.rotation.is_none());
     }

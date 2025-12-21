@@ -11,7 +11,7 @@ index = 0
 resolution = [640, 480]
 
 # Maximum frames per second for camera capture
-max_fps = 30
+fps = 30
 
 # Video format - supported: "MJPG", "YUYV", "RGB24"
 format = "MJPG"
@@ -21,7 +21,7 @@ format = "MJPG"
 
 [analyzer]
 # Motion analysis FPS (1-5 recommended)
-max_fps = 2
+fps = 2
 
 # Delta threshold (higher = less sensitive)
 delta_threshold = 20

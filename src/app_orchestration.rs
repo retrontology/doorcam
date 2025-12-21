@@ -121,6 +121,7 @@ impl DoorcamOrchestrator {
             config.stream.clone(),
             Arc::clone(&ring_buffer),
             Arc::clone(&event_bus),
+            config.camera.fps,
         ));
         
         // Initialize keyboard input handler for debugging (disabled by default)
@@ -216,6 +217,7 @@ impl DoorcamOrchestrator {
                 self.config.stream.clone(),
                 ring_buffer,
                 Arc::clone(&self.event_bus),
+                self.config.camera.fps,
             );
             
             // Start the server in a background task
@@ -635,12 +637,12 @@ mod tests {
             camera: crate::config::CameraConfig {
                 index: 0,
                 resolution: (640, 480),
-                max_fps: 30,
+                fps: 30,
                 format: "MJPG".to_string(),
                 rotation: None,
             },
             analyzer: crate::config::AnalyzerConfig {
-                max_fps: 5,
+                fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
                 hardware_acceleration: true,
@@ -860,7 +862,7 @@ mod tests {
     async fn test_orchestrator_configuration_access() {
         let config = create_test_config();
         let _original_camera_index = config.camera.index;
-        let _original_analyzer_fps = config.analyzer.max_fps;
+        let _original_analyzer_fps = config.analyzer.fps;
         
         let orchestrator = match DoorcamOrchestrator::new(config).await {
             Ok(orchestrator) => orchestrator,

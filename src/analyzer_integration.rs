@@ -81,8 +81,8 @@ impl MotionAnalyzerIntegration {
                     analyzer_guard.config().clone()
                 };
                 
-                // Calculate frame interval based on max_fps
-                let frame_interval = Duration::from_millis(1000 / config.max_fps as u64);
+                // Calculate frame interval based on fps
+                let frame_interval = Duration::from_millis(1000 / config.fps as u64);
                 
                 // Check if enough time has passed since last analysis
                 let should_analyze = {
@@ -103,7 +103,7 @@ impl MotionAnalyzerIntegration {
                                 *last_time = std::time::Instant::now();
                             }
                             
-                            debug!("Analyzing frame {} (fps limit: {})", frame.id, config.max_fps);
+                            debug!("Analyzing frame {} (fps limit: {})", frame.id, config.fps);
                             
                             // Analyze the frame with timeout to prevent blocking shutdown
                             let analysis_result = tokio::time::timeout(
@@ -404,7 +404,7 @@ mod tests {
     #[tokio::test]
     async fn test_motion_analyzer_integration_creation() {
         let config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -433,7 +433,7 @@ mod tests {
     #[tokio::test]
     async fn test_motion_analyzer_integration_builder() {
         let config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -460,7 +460,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_motion_analyzer_integration_start_stop() {
         let config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -502,7 +502,7 @@ mod tests {
     #[tokio::test]
     async fn test_config_update() {
         let initial_config = AnalyzerConfig {
-            max_fps: 5,
+            fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
             hardware_acceleration: true,
@@ -523,7 +523,7 @@ mod tests {
         ).await.unwrap();
         
         let new_config = AnalyzerConfig {
-            max_fps: 10,
+            fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
             hardware_acceleration: false,
@@ -533,7 +533,7 @@ mod tests {
         assert!(integration.update_config(new_config.clone()).await.is_ok());
         
         let current_config = integration.get_config().await;
-        assert_eq!(current_config.max_fps, 10);
+        assert_eq!(current_config.fps, 10);
         assert_eq!(current_config.contour_minimum_area, 2000.0);
     }
 }

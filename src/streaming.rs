@@ -14,7 +14,7 @@ use axum::{
 };
 use bytes::Bytes;
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn};
 
 /// MJPEG streaming server that serves camera frames over HTTP
@@ -22,6 +22,7 @@ pub struct StreamServer {
     config: StreamConfig,
     ring_buffer: Arc<RingBuffer>,
     event_bus: Arc<EventBus>,
+    target_frame_interval: Duration,
 }
 
 /// Shared state for the Axum server
@@ -29,6 +30,7 @@ pub struct StreamServer {
 struct ServerState {
     ring_buffer: Arc<RingBuffer>,
     event_bus: Arc<EventBus>,
+    target_frame_interval: Duration,
 }
 
 impl StreamServer {
@@ -37,11 +39,17 @@ impl StreamServer {
         config: StreamConfig,
         ring_buffer: Arc<RingBuffer>,
         event_bus: Arc<EventBus>,
+        target_fps: u32,
     ) -> Self {
+        let target_frame_interval = Duration::from_micros(
+            1_000_000u64 / target_fps.max(1) as u64
+        );
+
         Self {
             config,
             ring_buffer,
             event_bus,
+            target_frame_interval,
         }
     }
 
@@ -50,6 +58,7 @@ impl StreamServer {
         let state = ServerState {
             ring_buffer: Arc::clone(&self.ring_buffer),
             event_bus: Arc::clone(&self.event_bus),
+            target_frame_interval: self.target_frame_interval,
         };
 
         let app = Router::new()
@@ -88,99 +97,70 @@ async fn mjpeg_stream_handler(
 
     let stream = async_stream::stream! {
         let mut last_frame_id = 0u64;
-        let mut frame_interval = interval(Duration::from_millis(33)); // ~30 FPS default
+        let mut frame_interval = interval(state.target_frame_interval);
+        frame_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut frames_streamed = 0u64;
         let mut bytes_streamed = 0u64;
         let stream_start = std::time::Instant::now();
-
-        // Adaptive frame rate based on available frames
-        let mut adaptive_interval = Duration::from_millis(33);
-        let mut last_frame_time = std::time::Instant::now();
+        let mut last_frame: Option<FrameData> = None;
 
         loop {
             frame_interval.tick().await;
 
             match state.ring_buffer.get_latest_frame().await {
                 Some(frame) => {
-                    // Only send new frames to avoid duplicates
+                    // Stash newest frame; even if duplicate ID we can reuse for pacing
                     if frame.id > last_frame_id {
                         last_frame_id = frame.id;
-
-                        // Adaptive frame rate: adjust based on frame availability
-                        let now = std::time::Instant::now();
-                        let time_since_last = now.duration_since(last_frame_time);
-                        
-                        // If frames are coming faster than our interval, speed up
-                        // If frames are coming slower, slow down to match
-                        if time_since_last < adaptive_interval {
-                            adaptive_interval = std::cmp::max(
-                                Duration::from_millis(16), // Min 60 FPS
-                                time_since_last
-                            );
-                        } else if time_since_last > adaptive_interval * 2 {
-                            adaptive_interval = std::cmp::min(
-                                Duration::from_millis(100), // Max 10 FPS
-                                time_since_last
-                            );
-                        }
-                        
-                        last_frame_time = now;
-
-                        match prepare_frame_for_streaming(&frame).await {
-                            Ok(jpeg_data) => {
-                                let frame_size = jpeg_data.len();
-                                frames_streamed += 1;
-                                bytes_streamed += frame_size as u64;
-
-                                debug!(
-                                    "Streaming frame {} ({} bytes, {} total frames, {:.1} MB total)",
-                                    frame.id, 
-                                    frame_size,
-                                    frames_streamed,
-                                    bytes_streamed as f64 / 1_048_576.0
-                                );
-
-                                // Send multipart boundary and headers
-                                let boundary = format!(
-                                    "--FRAME\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nX-Frame-ID: {}\r\nX-Timestamp: {}\r\n\r\n",
-                                    frame_size,
-                                    frame.id,
-                                    frame.timestamp.duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis()
-                                );
-
-                                yield Ok::<_, axum::Error>(Bytes::from(boundary));
-                                yield Ok(Bytes::from(jpeg_data));
-                                yield Ok(Bytes::from("\r\n"));
-
-                                // Update frame interval for next iteration
-                                frame_interval = interval(adaptive_interval);
-                            }
-                            Err(e) => {
-                                error!("Failed to prepare frame {} for streaming: {}", frame.id, e);
-                                
-                                // Publish error event
-                                let _ = state.event_bus.publish(DoorcamEvent::SystemError {
-                                    component: "stream_server".to_string(),
-                                    error: format!("Frame preparation failed: {}", e),
-                                }).await;
-                                
-                                // Continue with next frame instead of breaking the stream
-                            }
-                        }
-                    } else {
-                        // No new frame available, wait a bit longer
-                        trace!("No new frame available (last: {})", last_frame_id);
                     }
+                    last_frame = Some(frame);
                 }
                 None => {
-                    // No frames available yet, continue waiting
+                    // No new frames available from buffer
                     trace!("No frames available for streaming");
-                    
-                    // Slow down when no frames are available
-                    adaptive_interval = Duration::from_millis(100);
-                    frame_interval = interval(adaptive_interval);
+                }
+            }
+
+            if let Some(frame) = last_frame.as_ref() {
+                match prepare_frame_for_streaming(frame).await {
+                    Ok(jpeg_data) => {
+                        let frame_size = jpeg_data.len();
+                        frames_streamed += 1;
+                        bytes_streamed += frame_size as u64;
+
+                        debug!(
+                            "Streaming frame {} ({} bytes, {} total frames, {:.1} MB total)",
+                            frame.id, 
+                            frame_size,
+                            frames_streamed,
+                            bytes_streamed as f64 / 1_048_576.0
+                        );
+
+                        // Send multipart boundary and headers
+                        let boundary = format!(
+                            "--FRAME\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nX-Frame-ID: {}\r\nX-Timestamp: {}\r\n\r\n",
+                            frame_size,
+                            frame.id,
+                            frame.timestamp.duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+
+                        yield Ok::<_, axum::Error>(Bytes::from(boundary));
+                        yield Ok(Bytes::from(jpeg_data));
+                        yield Ok(Bytes::from("\r\n"));
+                    }
+                    Err(e) => {
+                        error!("Failed to prepare frame {} for streaming: {}", frame.id, e);
+                        
+                        // Publish error event
+                        let _ = state.event_bus.publish(DoorcamEvent::SystemError {
+                            component: "stream_server".to_string(),
+                            error: format!("Frame preparation failed: {}", e),
+                        }).await;
+                        
+                        // Continue with next frame instead of breaking the stream
+                    }
                 }
             }
 
@@ -353,6 +333,7 @@ pub struct StreamServerBuilder {
     config: Option<StreamConfig>,
     ring_buffer: Option<Arc<RingBuffer>>,
     event_bus: Option<Arc<EventBus>>,
+    target_fps: Option<u32>,
 }
 
 impl StreamServerBuilder {
@@ -362,6 +343,7 @@ impl StreamServerBuilder {
             config: None,
             ring_buffer: None,
             event_bus: None,
+            target_fps: None,
         }
     }
 
@@ -380,6 +362,12 @@ impl StreamServerBuilder {
     /// Set the event bus
     pub fn event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
         self.event_bus = Some(event_bus);
+        self
+    }
+
+    /// Set the target FPS for pacing
+    pub fn target_fps(mut self, fps: u32) -> Self {
+        self.target_fps = Some(fps);
         self
     }
 
@@ -403,7 +391,13 @@ impl StreamServerBuilder {
             })
         })?;
 
-        Ok(StreamServer::new(config, ring_buffer, event_bus))
+        let target_fps = self.target_fps.ok_or_else(|| {
+            DoorcamError::Stream(StreamError::StartupFailed {
+                details: "Target FPS is required".to_string()
+            })
+        })?;
+
+        Ok(StreamServer::new(config, ring_buffer, event_bus, target_fps))
     }
 }
 
@@ -465,6 +459,7 @@ mod tests {
             .config(config)
             .ring_buffer(ring_buffer)
             .event_bus(event_bus)
+            .target_fps(30)
             .build()
             .unwrap();
 
@@ -544,6 +539,7 @@ mod tests {
                 port: 8080,
             })
             .event_bus(Arc::new(EventBus::new(10)))
+            .target_fps(30)
             .build();
         assert!(result.is_err());
 
@@ -554,6 +550,7 @@ mod tests {
                 port: 8080,
             })
             .ring_buffer(Arc::new(RingBuffer::new(10, Duration::from_secs(1))))
+            .target_fps(30)
             .build();
         assert!(result.is_err());
     }
