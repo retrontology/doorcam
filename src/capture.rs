@@ -513,40 +513,56 @@ impl VideoCapture {
             DoorcamError::component("video_capture", &format!("Failed to initialize GStreamer: {}", e))
         })?;
 
-        // Use hardware H.264 encoding via V4L2 with explicit level setting
-        // Use v4l2jpegdec for hardware-accelerated JPEG decoding on Pi 4
-        // Note: Must set h264_level in extra-controls AND output caps level to avoid driver errors
-        // Higher quality encoding for 1920x1080:
-        // - 8 Mbps bitrate (good quality for Full HD)
-        // - Variable bitrate mode for better quality/size ratio
-        // - High profile for better compression efficiency
-        let pipeline_desc = format!(
-            "appsrc name=src format=time is-live=false caps=image/jpeg,framerate=30/1 ! \
-             v4l2jpegdec ! \
-             videoconvert ! \
-             v4l2h264enc extra-controls=\"controls,h264_level=11,h264_profile=4,video_bitrate=8000000,video_bitrate_mode=0,repeat_sequence_header=1\" ! \
-             video/x-h264,level=(string)4 ! \
-             h264parse ! \
+        // Software pipeline (x264):
+        //  - appsrc (JPEG) -> jpegparse -> jpegdec (SW) -> videoconvert -> I420
+        //  - x264enc (SW, quality-focused preset) -> h264parse -> mp4mux -> filesink
+        let sw_pipeline_desc = format!(
+            "appsrc name=src format=time is-live=false do-timestamp=true caps=image/jpeg,framerate=30/1 ! \
+             jpegparse ! \
+             jpegdec ! \
+             videoconvert ! video/x-raw,format=I420 ! \
+             x264enc speed-preset=medium bitrate=10000 key-int-max=60 ! \
+             video/x-h264,stream-format=byte-stream,alignment=au,profile=high ! \
+             h264parse config-interval=1 ! \
              mp4mux faststart=true ! \
              filesink location={}",
             video_path.to_string_lossy()
         );
-        
-        let encoder_type = "hardware (v4l2jpegdec + v4l2h264enc)";
 
-        info!("Creating GStreamer video encoding pipeline using {} decoder/encoder", encoder_type);
-        debug!("Pipeline: {}", pipeline_desc);
+        // Software encode (no hardware dependency).
+        Self::encode_frames_with_pipeline("software", &sw_pipeline_desc, frames, video_path, config).await
+    }
 
-        let pipeline = gstreamer::parse::launch(&pipeline_desc)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create video pipeline: {}", e)))?
+    /// Encode frames using a provided GStreamer pipeline description (software path).
+    #[cfg(all(feature = "video_encoding", target_os = "linux"))]
+    async fn encode_frames_with_pipeline(
+        label: &str,
+        pipeline_desc: &str,
+        frames: &[FrameData],
+        video_path: &Path,
+        config: &CaptureConfig,
+    ) -> Result<()> {
+        // Lower this thread's niceness to reduce interference with realtime capture/display.
+        #[cfg(target_os = "linux")]
+        {
+            use libc::{setpriority, PRIO_PROCESS};
+            // Best-effort: if it fails, continue.
+            let _ = unsafe { setpriority(PRIO_PROCESS as u32, 0, 10) };
+        }
+
+        info!("Creating GStreamer video pipeline ({})", label);
+        debug!("Pipeline ({}): {}", label, pipeline_desc);
+
+        let pipeline = gstreamer::parse::launch(pipeline_desc)
+            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to create pipeline: {}", label, e)))?
             .downcast::<Pipeline>()
-            .map_err(|_| DoorcamError::component("video_capture", "Failed to downcast to Pipeline"))?;
+            .map_err(|_| DoorcamError::component("video_capture", &format!("[{}] Failed to downcast to Pipeline", label)))?;
 
         let appsrc = pipeline
             .by_name("src")
-            .ok_or_else(|| DoorcamError::component("video_capture", "Failed to get appsrc element"))?
+            .ok_or_else(|| DoorcamError::component("video_capture", &format!("[{}] Failed to get appsrc element", label)))?
             .downcast::<AppSrc>()
-            .map_err(|_| DoorcamError::component("video_capture", "Failed to downcast to AppSrc"))?;
+            .map_err(|_| DoorcamError::component("video_capture", &format!("[{}] Failed to downcast to AppSrc", label)))?;
 
         // Configure appsrc
         appsrc.set_property("format", gstreamer::Format::Time);
@@ -554,9 +570,9 @@ impl VideoCapture {
 
         // Start pipeline
         pipeline.set_state(gstreamer::State::Playing)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to start video pipeline: {}", e)))?;
+            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to start pipeline: {}", label, e)))?;
 
-        info!("Started GStreamer video encoding pipeline");
+        info!("Started GStreamer encoding pipeline ({})", label);
 
         // Get base time from first frame
         let base_time = if let Some(first_frame) = frames.first() {
@@ -567,18 +583,18 @@ impl VideoCapture {
         } else {
             0
         };
-        
-        info!("Encoding {} frames", frames.len());
-        
+
+        info!("[{}] Encoding {} frames to {}", label, frames.len(), video_path.display());
+
         // Process frames
         for (frame_index, frame) in frames.iter().enumerate() {
             // Get JPEG data from frame (with optional timestamp overlay)
             let jpeg_data = if config.timestamp_overlay {
                 // Apply timestamp overlay
                 let processed_frame = ProcessedFrame::from_frame(frame.clone(), None).await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e)))?;
+                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Frame processing failed: {}", label, e)))?;
                 let base_jpeg = processed_frame.get_jpeg().await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("JPEG encoding failed: {}", e)))?;
+                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] JPEG encoding failed: {}", label, e)))?;
                 Self::add_timestamp_overlay_static(&base_jpeg, frame.timestamp, config).await?
             } else {
                 // Use frame data directly (already an Arc<Vec<u8>>)
@@ -587,12 +603,12 @@ impl VideoCapture {
 
             // Create GStreamer buffer
             let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len())
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create buffer: {}", e)))?;
+                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to create buffer: {}", label, e)))?;
 
             {
                 let buffer_ref = buffer.get_mut().unwrap();
                 let mut map = buffer_ref.map_writable()
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to map buffer: {}", e)))?;
+                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to map buffer: {}", label, e)))?;
                 map.copy_from_slice(&jpeg_data);
             }
 
@@ -602,7 +618,7 @@ impl VideoCapture {
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64;
             let relative_ns = frame_ns.saturating_sub(base_time);
-            
+
             // Calculate duration to next frame
             let next_duration = if frame_index + 1 < frames.len() {
                 let next_frame = &frames[frame_index + 1];
@@ -614,34 +630,36 @@ impl VideoCapture {
             } else {
                 1_000_000_000 / 30 // Last frame, use default 30 FPS duration
             };
-            
+
             // Set timestamp and duration
             buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(relative_ns));
             buffer.get_mut().unwrap().set_duration(gstreamer::ClockTime::from_nseconds(next_duration));
 
             // Push buffer
             appsrc.push_buffer(buffer)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to push buffer: {:?}", e)))?;
+                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to push buffer: {:?}", label, e)))?;
 
             if frame_index % 30 == 0 && frame_index > 0 {
-                debug!("Encoded {} frames to video", frame_index);
+                debug!("[{}] Encoded {} frames", label, frame_index);
             }
         }
 
         // Signal end of stream
         appsrc.end_of_stream()
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to signal EOS: {:?}", e)))?;
+            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to signal EOS: {:?}", label, e)))?;
 
         // Wait for pipeline to finish
         let bus = pipeline.bus().unwrap();
         for msg in bus.iter_timed(gstreamer::ClockTime::from_seconds(30)) {
             match msg.view() {
                 gstreamer::MessageView::Eos(..) => {
-                    info!("Video encoding completed successfully");
+                    info!("[{}] Video encoding completed successfully", label);
                     break;
                 }
                 gstreamer::MessageView::Error(err) => {
-                    let error_msg = format!("Video encoding error: {} ({})", err.error(), err.debug().unwrap_or_default());
+                    let error_msg = format!("[{}] Video encoding error: {} ({})", label, err.error(), err.debug().unwrap_or_default());
+                    // Stop pipeline before returning
+                    let _ = pipeline.set_state(gstreamer::State::Null);
                     return Err(DoorcamError::component("video_capture", &error_msg));
                 }
                 _ => {}
@@ -650,9 +668,9 @@ impl VideoCapture {
 
         // Stop pipeline
         pipeline.set_state(gstreamer::State::Null)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to stop pipeline: {}", e)))?;
+            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to stop pipeline: {}", label, e)))?;
 
-        info!("GStreamer video encoding completed: {} frames", frames.len());
+        info!("[{}] GStreamer video encoding completed: {} frames", label, frames.len());
         Ok(())
     }
 

@@ -624,6 +624,7 @@ dependencies = [
  "gstreamer-video",
  "image",
  "imageproc",
+ "libc",
  "parking_lot",
  "rusttype",
  "serde",

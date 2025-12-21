@@ -29,6 +29,9 @@ anyhow = "1.0"
 # CLI argument parsing
 clap = { version = "4.0", features = ["derive"] }
 
+# Platform bindings
+libc = "0.2"
+
 # Atomic operations and concurrency
 crossbeam = "0.8"
 parking_lot = "0.12"
