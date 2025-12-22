@@ -1,5 +1,5 @@
 use crate::{
-    config::StreamConfig,
+    config::{Rotation, StreamConfig},
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, FrameFormat},
     ring_buffer::RingBuffer,
@@ -8,7 +8,7 @@ use crate::{
 use axum::{
     extract::State,
     http::{header, StatusCode},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -31,6 +31,7 @@ struct ServerState {
     ring_buffer: Arc<RingBuffer>,
     event_bus: Arc<EventBus>,
     target_frame_interval: Duration,
+    stream_rotation: Option<Rotation>,
 }
 
 impl StreamServer {
@@ -59,9 +60,11 @@ impl StreamServer {
             ring_buffer: Arc::clone(&self.ring_buffer),
             event_bus: Arc::clone(&self.event_bus),
             target_frame_interval: self.target_frame_interval,
+            stream_rotation: self.config.rotation,
         };
 
         let app = Router::new()
+            .route("/", get(stream_page_handler))
             .route("/stream.mjpg", get(mjpeg_stream_handler))
             .route("/health", get(health_handler))
             .with_state(state);
@@ -215,6 +218,62 @@ async fn health_handler(
     });
 
     (StatusCode::OK, axum::Json(health_info))
+}
+
+/// Simple HTML page for viewing the MJPEG stream with optional CSS rotation
+async fn stream_page_handler(
+    State(state): State<ServerState>,
+) -> impl IntoResponse {
+    let rotation_deg = rotation_to_degrees(state.stream_rotation);
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Doorcam Stream</title>
+    <style>
+        :root {{ color-scheme: dark; }}
+        body {{
+            margin: 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }}
+        img.stream {{
+            display: block;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            transform: rotate({rotation}deg);
+            transform-origin: center center;
+            background: #000;
+        }}
+    </style>
+</head>
+<body>
+    <img class="stream" src="/stream.mjpg" alt="Doorcam stream">
+</body>
+</html>
+"#,
+        rotation = rotation_deg,
+    );
+
+    Html(html)
+}
+
+fn rotation_to_degrees(rotation: Option<Rotation>) -> u16 {
+    match rotation {
+        Some(Rotation::Rotate90) => 90,
+        Some(Rotation::Rotate180) => 180,
+        Some(Rotation::Rotate270) => 270,
+        None => 0,
+    }
 }
 
 /// Prepare a frame for streaming by ensuring it's in JPEG format
@@ -451,6 +510,7 @@ mod tests {
         let config = StreamConfig {
             ip: "127.0.0.1".to_string(),
             port: 8080,
+            rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
         let event_bus = Arc::new(EventBus::new(10));
@@ -537,6 +597,7 @@ mod tests {
             .config(StreamConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8080,
+                rotation: None,
             })
             .event_bus(Arc::new(EventBus::new(10)))
             .target_fps(30)
@@ -548,6 +609,7 @@ mod tests {
             .config(StreamConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8080,
+                rotation: None,
             })
             .ring_buffer(Arc::new(RingBuffer::new(10, Duration::from_secs(1))))
             .target_fps(30)

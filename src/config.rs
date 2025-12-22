@@ -111,6 +111,9 @@ pub struct StreamConfig {
     /// Port to listen on
     #[serde(default = "default_stream_port")]
     pub port: u16,
+
+    /// Optional rotation to apply when presenting the MJPEG stream
+    pub rotation: Option<Rotation>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -286,6 +289,7 @@ impl Default for DoorcamConfig {
             stream: StreamConfig {
                 ip: default_stream_ip(),
                 port: default_stream_port(),
+                rotation: None,
             },
             display: DisplayConfig {
                 framebuffer_device: default_framebuffer_device(),
@@ -379,6 +383,7 @@ mod tests {
             stream: StreamConfig {
                 ip: default_stream_ip(),
                 port: default_stream_port(),
+                rotation: None,
             },
             display: DisplayConfig {
                 framebuffer_device: default_framebuffer_device(),
@@ -446,6 +451,7 @@ mod tests {
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),
                 port: 8080,
+                rotation: None,
             },
             display: DisplayConfig {
                 framebuffer_device: "/dev/fb0".to_string(),

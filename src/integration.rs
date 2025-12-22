@@ -289,6 +289,7 @@ mod tests {
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),
                 port: 8080,
+                rotation: None,
             },
             display: DisplayConfig {
                 framebuffer_device: "/dev/fb0".to_string(),

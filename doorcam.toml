@@ -71,6 +71,9 @@ ip = "0.0.0.0"
 # Port for MJPEG stream server
 port = 8080
 
+# Optional stream rotation for the HTML viewer (applies CSS transform)
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
 [display]
 # Framebuffer device for HyperPixel display
 framebuffer_device = "/dev/fb0"

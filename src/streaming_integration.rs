@@ -374,6 +374,7 @@ mod tests {
         let config = StreamConfig {
             ip: "127.0.0.1".to_string(),
             port: 8080,
+            rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
         let event_bus = Arc::new(EventBus::new(10));
@@ -430,6 +431,7 @@ mod tests {
         let config = StreamConfig {
             ip: "127.0.0.1".to_string(),
             port: 8080,
+            rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
         let event_bus = Arc::new(EventBus::new(10));
