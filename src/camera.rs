@@ -451,7 +451,6 @@ mod tests {
             resolution: (640, 480),
             fps: 30,
             format: "MJPG".to_string(),
-            rotation: None,
         }
     }
 
@@ -545,7 +544,6 @@ mod tests {
             resolution: (640, 480),
             fps: 30,
             format: "MJPG".to_string(),
-            rotation: None,
         };
         
         // Basic validation - config should be valid
@@ -553,6 +551,5 @@ mod tests {
         assert_eq!(config.resolution, (640, 480));
         assert_eq!(config.fps, 30);
         assert_eq!(config.format, "MJPG");
-        assert!(config.rotation.is_none());
     }
 }

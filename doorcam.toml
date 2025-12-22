@@ -16,9 +16,6 @@ fps = 30
 # Video format - supported: "MJPG", "YUYV", "RGB24"
 format = "MJPG"
 
-# Optional frame rotation - uncomment to enable
-# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
-
 [analyzer]
 # Motion analysis FPS (1-5 recommended)
 fps = 2
@@ -63,6 +60,9 @@ keep_images = false
 # Save metadata JSON files for each capture event (stored in captures/metadata/)
 # Event subdirectories are only created when keep_images is true
 save_metadata = false
+
+# Optional capture rotation - uncomment to enable
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
 
 [stream]
 # IP address to bind MJPEG stream server (0.0.0.0 = all interfaces)

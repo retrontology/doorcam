@@ -266,7 +266,6 @@ mod tests {
                 resolution: (640, 480),
                 fps: 30,
                 format: "MJPG".to_string(),
-                rotation: None,
             },
             analyzer: AnalyzerConfig {
                 fps: 5,
@@ -285,6 +284,7 @@ mod tests {
                 video_encoding: false,
                 keep_images: true,
                 save_metadata: true,
+                rotation: None,
             },
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),

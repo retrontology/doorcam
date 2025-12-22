@@ -2,7 +2,7 @@ use crate::{
     config::CaptureConfig,
     error::{CaptureError, DoorcamError, Result},
     events::{DoorcamEvent, EventBus},
-    frame::{FrameData, ProcessedFrame},
+    frame::{FrameData, ProcessedFrame, Rotation as FrameRotation},
     ring_buffer::RingBuffer,
     wal::{WalWriter, WalReader, delete_wal, find_wal_files},
 };
@@ -485,16 +485,10 @@ impl VideoCapture {
             let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
             let file_path = frames_dir.join(&filename);
             
-            // Get JPEG data (with optional timestamp overlay)
-            let jpeg_data = if config.timestamp_overlay {
-                let processed_frame = ProcessedFrame::from_frame(frame.clone(), None).await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e)))?;
-                let base_jpeg = processed_frame.get_jpeg().await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("JPEG encoding failed: {}", e)))?;
-                Self::add_timestamp_overlay_static(&base_jpeg, frame.timestamp, config).await?
-            } else {
-                frame.data.clone()
-            };
+            // Get JPEG data (with optional rotation and timestamp overlay)
+            let jpeg_data = Self::prepare_jpeg(frame, config)
+                .await
+                .map_err(|e| DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e)))?;
             
             // Write to file
             fs::write(&file_path, &*jpeg_data).await
@@ -588,18 +582,10 @@ impl VideoCapture {
 
         // Process frames
         for (frame_index, frame) in frames.iter().enumerate() {
-            // Get JPEG data from frame (with optional timestamp overlay)
-            let jpeg_data = if config.timestamp_overlay {
-                // Apply timestamp overlay
-                let processed_frame = ProcessedFrame::from_frame(frame.clone(), None).await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Frame processing failed: {}", label, e)))?;
-                let base_jpeg = processed_frame.get_jpeg().await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] JPEG encoding failed: {}", label, e)))?;
-                Self::add_timestamp_overlay_static(&base_jpeg, frame.timestamp, config).await?
-            } else {
-                // Use frame data directly (already an Arc<Vec<u8>>)
-                frame.data.clone()
-            };
+            // Get JPEG data from frame (with optional rotation and overlay)
+            let jpeg_data = Self::prepare_jpeg(frame, config)
+                .await
+                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Frame processing failed: {}", label, e)))?;
 
             // Create GStreamer buffer
             let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len())
@@ -848,6 +834,34 @@ impl VideoCapture {
         info!("Video capture system stopped");
         Ok(())
     }
+
+    /// Prepare JPEG data for storage/encoding with optional rotation and overlay
+    async fn prepare_jpeg(frame: &FrameData, config: &CaptureConfig) -> Result<Arc<Vec<u8>>> {
+        let rotation = map_capture_rotation(config.rotation.as_ref());
+
+        // If we need to rotate or overlay, go through processing pipeline
+        if config.timestamp_overlay || rotation.is_some() {
+            let processed_frame = ProcessedFrame::from_frame(frame.clone(), rotation).await?;
+            let base_jpeg = processed_frame.get_jpeg().await?;
+
+            if config.timestamp_overlay {
+                Self::add_timestamp_overlay_static(&base_jpeg, frame.timestamp, config).await
+            } else {
+                Ok(base_jpeg)
+            }
+        } else {
+            Ok(frame.data.clone())
+        }
+    }
+}
+
+/// Map configuration rotation into frame processing rotation
+fn map_capture_rotation(rotation: Option<&crate::config::Rotation>) -> Option<FrameRotation> {
+    rotation.map(|rot| match rot {
+        crate::config::Rotation::Rotate90 => FrameRotation::Rotate90,
+        crate::config::Rotation::Rotate180 => FrameRotation::Rotate180,
+        crate::config::Rotation::Rotate270 => FrameRotation::Rotate270,
+    })
 }
 
 impl Clone for VideoCapture {
@@ -904,6 +918,7 @@ mod tests {
             video_encoding: false,
             keep_images: true,
             save_metadata: true,
+            rotation: None,
         }
     }
 

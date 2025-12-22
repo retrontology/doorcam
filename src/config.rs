@@ -35,8 +35,6 @@ pub struct CameraConfig {
     #[serde(default = "default_camera_format")]
     pub format: String,
     
-    /// Frame rotation
-    pub rotation: Option<Rotation>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -99,6 +97,9 @@ pub struct CaptureConfig {
     /// Save metadata JSON files for each capture event
     #[serde(default = "default_save_metadata")]
     pub save_metadata: bool,
+
+    /// Capture rotation to apply when saving media
+    pub rotation: Option<Rotation>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -161,7 +162,7 @@ pub struct SystemConfig {
     pub event_bus_capacity: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum Rotation {
     Rotate90,
     Rotate180,
@@ -262,7 +263,6 @@ impl Default for DoorcamConfig {
                 resolution: default_camera_resolution(),
                 fps: default_camera_fps(),
                 format: default_camera_format(),
-                rotation: None,
             },
             analyzer: AnalyzerConfig {
                 fps: default_analyzer_fps(),
@@ -281,6 +281,7 @@ impl Default for DoorcamConfig {
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
                 save_metadata: default_save_metadata(),
+                rotation: None,
             },
             stream: StreamConfig {
                 ip: default_stream_ip(),
@@ -355,7 +356,6 @@ mod tests {
                 resolution: default_camera_resolution(),
                 fps: default_camera_fps(),
                 format: default_camera_format(),
-                rotation: None,
             },
             analyzer: AnalyzerConfig {
                 fps: default_analyzer_fps(),
@@ -374,6 +374,7 @@ mod tests {
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
                 save_metadata: default_save_metadata(),
+                rotation: None,
             },
             stream: StreamConfig {
                 ip: default_stream_ip(),
@@ -422,7 +423,6 @@ mod tests {
                 resolution: (0, 0), // Invalid resolution
                 fps: 30,
                 format: "MJPG".to_string(),
-                rotation: None,
             },
             analyzer: AnalyzerConfig {
                 fps: 5,
@@ -441,6 +441,7 @@ mod tests {
                 video_encoding: false,
                 keep_images: false,
                 save_metadata: false,
+                rotation: None,
             },
             stream: StreamConfig {
                 ip: "0.0.0.0".to_string(),

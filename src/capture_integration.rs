@@ -175,6 +175,7 @@ mod tests {
             video_encoding: false,
             keep_images: true,
             save_metadata: true,
+            rotation: None,
         }
     }
 

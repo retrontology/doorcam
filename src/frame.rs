@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "motion_analysis")]
+use image::codecs::jpeg::JpegEncoder;
 
 /// Frame format enumeration supporting different video formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,17 +241,53 @@ impl FrameProcessor {
         frame: &FrameData,
         rotation: Rotation,
     ) -> Result<Arc<Vec<u8>>, crate::error::DoorcamError> {
-        // TODO: Implement actual rotation using OpenCV in later tasks
-        // For now, return a copy of the original data
-        tracing::debug!(
-            "Rotation {:?} requested for frame {} ({}x{}) - placeholder implementation",
-            rotation,
-            frame.id,
-            frame.width,
-            frame.height
-        );
-        
-        Ok(Arc::clone(&frame.data))
+        #[cfg(feature = "motion_analysis")]
+        {
+            // For MJPEG, decode, rotate, and re-encode. For other formats, no-op for now.
+            match frame.format {
+                FrameFormat::Mjpeg => {
+                    let img = image::load_from_memory(&frame.data).map_err(|e| {
+                        crate::error::ProcessingError::Rotation {
+                            details: format!("JPEG decode failed: {}", e),
+                        }
+                    })?;
+
+                    let rotated = match rotation {
+                        Rotation::Rotate90 => img.rotate90(),
+                        Rotation::Rotate180 => img.rotate180(),
+                        Rotation::Rotate270 => img.rotate270(),
+                    };
+
+                    let mut buf = Vec::new();
+                    let mut encoder = JpegEncoder::new_with_quality(&mut buf, 90);
+                    encoder.encode_image(&rotated).map_err(|e| {
+                        crate::error::ProcessingError::JpegEncoding {
+                            details: e.to_string(),
+                        }
+                    })?;
+
+                    Ok(Arc::new(buf))
+                }
+                _ => {
+                    tracing::debug!(
+                        "Rotation {:?} requested for non-MJPEG frame {} - returning original",
+                        rotation,
+                        frame.id
+                    );
+                    Ok(Arc::clone(&frame.data))
+                }
+            }
+        }
+
+        #[cfg(not(feature = "motion_analysis"))]
+        {
+            tracing::warn!(
+                "Rotation {:?} requested for frame {} but motion_analysis feature is disabled; returning original bytes",
+                rotation,
+                frame.id
+            );
+            Ok(Arc::clone(&frame.data))
+        }
     }
     
     /// Convert frame to JPEG format (placeholder for future OpenCV integration)
