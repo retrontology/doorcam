@@ -146,12 +146,24 @@ impl VideoCapture {
         let capture_system = Arc::new(self.clone());
 
         tokio::spawn(async move {
-            while let Ok(event) = event_receiver.recv().await {
-                if let DoorcamEvent::MotionDetected { contour_area, timestamp } = event {
-                    debug!("Motion detected, starting capture (area: {:.2})", contour_area);
-                    
-                    if let Err(e) = capture_system.handle_motion_detected(timestamp).await {
-                        error!("Failed to handle motion detection: {}", e);
+            loop {
+                match event_receiver.recv().await {
+                    Ok(event) => {
+                        if let DoorcamEvent::MotionDetected { contour_area, timestamp } = event {
+                            debug!("Motion detected, starting capture (area: {:.2})", contour_area);
+                            
+                            if let Err(e) = capture_system.handle_motion_detected(timestamp).await {
+                                error!("Failed to handle motion detection: {}", e);
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        warn!("Capture event listener lagged by {} events; continuing", skipped);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!("Event bus closed; stopping capture event listener");
+                        break;
                     }
                 }
             }

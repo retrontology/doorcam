@@ -123,14 +123,26 @@ impl EventStorage {
         let storage_system = Arc::new(self.clone());
 
         tokio::spawn(async move {
-            while let Ok(event) = event_receiver.recv().await {
-                match event {
-                    DoorcamEvent::CaptureCompleted { event_id, file_count } => {
-                        if let Err(e) = storage_system.register_completed_capture(&event_id, file_count).await {
-                            error!("Failed to register completed capture {}: {}", event_id, e);
+            loop {
+                match event_receiver.recv().await {
+                    Ok(event) => {
+                        match event {
+                            DoorcamEvent::CaptureCompleted { event_id, file_count } => {
+                                if let Err(e) = storage_system.register_completed_capture(&event_id, file_count).await {
+                                    error!("Failed to register completed capture {}: {}", event_id, e);
+                                }
+                            }
+                            _ => {} // Ignore other events
                         }
                     }
-                    _ => {} // Ignore other events
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        warn!("Storage event listener lagged by {} events; continuing", skipped);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!("Event bus closed; stopping storage event listener");
+                        break;
+                    }
                 }
             }
         });
