@@ -94,6 +94,10 @@ video_encoding = ["dep:gstreamer", "dep:gstreamer-app"]
 name = "doorcam"
 path = "src/main.rs"
 
+[[bin]]
+name = "waltool"
+path = "src/bin/wal_tool.rs"
+
 
 
 
