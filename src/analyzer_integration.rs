@@ -93,7 +93,15 @@ impl MotionAnalyzerIntegration {
                 if should_analyze {
                     // Get the latest frame from the ring buffer
                     if let Some(frame) = ring_buffer.get_latest_frame().await {
-                        // Skip if we've already analyzed this frame
+                        // Decide whether to analyze the frame, handling ID resets gracefully
+                        if frame.id < last_frame_id {
+                            warn!(
+                                "Detected frame ID reset ({} -> {}), resetting analysis cursor",
+                                last_frame_id, frame.id
+                            );
+                            last_frame_id = 0;
+                        }
+
                         if frame.id > last_frame_id {
                             last_frame_id = frame.id;
 
