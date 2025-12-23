@@ -1362,7 +1362,6 @@ mod tests {
         let system_config = SystemConfig {
             trim_old: true,
             retention_days: 7,
-            ring_buffer_capacity: 150,
             event_bus_capacity: 100,
         };
 

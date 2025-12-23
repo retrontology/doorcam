@@ -99,11 +99,6 @@ trim_old = true
 # How many days to keep capture events (if trim_old is enabled)
 retention_days = 7
 
-# Ring buffer capacity (number of frames to keep in memory)
-# Higher values = more preroll capability but more memory usage
-# Calculate as: event.preroll_seconds * camera_fps * safety_factor
-ring_buffer_capacity = 150
-
 # Event bus capacity (number of events that can be queued)
 event_bus_capacity = 100
 

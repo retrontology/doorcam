@@ -155,10 +155,6 @@ pub struct SystemConfig {
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
 
-    /// Ring buffer capacity (number of frames)
-    #[serde(default = "default_ring_buffer_capacity")]
-    pub ring_buffer_capacity: usize,
-
     /// Event bus capacity
     #[serde(default = "default_event_bus_capacity")]
     pub event_bus_capacity: usize,
@@ -230,10 +226,6 @@ impl DoorcamConfig {
             .set_default("system.trim_old", default_trim_old())?
             .set_default("system.retention_days", default_retention_days())?
             .set_default(
-                "system.ring_buffer_capacity",
-                default_ring_buffer_capacity() as i64,
-            )?
-            .set_default(
                 "system.event_bus_capacity",
                 default_event_bus_capacity() as i64,
             )?
@@ -287,12 +279,6 @@ impl DoorcamConfig {
         }
 
         // Validate system settings
-        if self.system.ring_buffer_capacity == 0 {
-            return Err(ConfigError::Message(
-                "Ring buffer capacity must be greater than 0".to_string(),
-            ));
-        }
-
         if self.system.event_bus_capacity == 0 {
             return Err(ConfigError::Message(
                 "Event bus capacity must be greater than 0".to_string(),
@@ -349,7 +335,6 @@ impl Default for DoorcamConfig {
             system: SystemConfig {
                 trim_old: default_trim_old(),
                 retention_days: default_retention_days(),
-                ring_buffer_capacity: default_ring_buffer_capacity(),
                 event_bus_capacity: default_event_bus_capacity(),
             },
         }
@@ -443,9 +428,6 @@ fn default_trim_old() -> bool {
 fn default_retention_days() -> u32 {
     7
 }
-fn default_ring_buffer_capacity() -> usize {
-    150
-}
 fn default_event_bus_capacity() -> usize {
     100
 }
@@ -501,7 +483,6 @@ mod tests {
             system: SystemConfig {
                 trim_old: default_trim_old(),
                 retention_days: default_retention_days(),
-                ring_buffer_capacity: default_ring_buffer_capacity(),
                 event_bus_capacity: default_event_bus_capacity(),
             },
         };
@@ -570,7 +551,6 @@ mod tests {
             system: SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                ring_buffer_capacity: 150,
                 event_bus_capacity: 100,
             },
         };

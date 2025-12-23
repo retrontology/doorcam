@@ -4,6 +4,7 @@ use crate::config::DoorcamConfig;
 use crate::display_integration::DisplayIntegration;
 use crate::error::{DoorcamError, Result};
 use crate::events::EventBus;
+use crate::integration::calculate_ring_buffer_capacity;
 use crate::integration::CameraRingBufferIntegration;
 use crate::keyboard_input::KeyboardInputHandler;
 use crate::ring_buffer::RingBuffer;
@@ -68,8 +69,10 @@ impl DoorcamOrchestrator {
     /// Create a new orchestrator with the given configuration
     pub async fn new(config: DoorcamConfig) -> Result<Self> {
         let event_bus = Arc::new(EventBus::new(config.system.event_bus_capacity));
+        let ring_buffer_capacity =
+            calculate_ring_buffer_capacity(config.camera.fps, config.event.preroll_seconds);
         let ring_buffer = Arc::new(RingBuffer::new(
-            config.system.ring_buffer_capacity,
+            ring_buffer_capacity,
             Duration::from_secs(config.event.preroll_seconds as u64),
         ));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
@@ -739,7 +742,6 @@ mod tests {
             system: crate::config::SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                ring_buffer_capacity: 300,
                 event_bus_capacity: 100,
             },
             stream: crate::config::StreamConfig {

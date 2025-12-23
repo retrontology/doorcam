@@ -7,6 +7,14 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, warn};
 
+/// Calculate an appropriate ring buffer capacity from fps and preroll.
+/// Uses a small safety factor to avoid overruns during bursty load.
+pub fn calculate_ring_buffer_capacity(camera_fps: u32, preroll_seconds: u32) -> usize {
+    // Safety factor of 2 to cover decoder/processing jitter.
+    let estimated = (camera_fps as u64 * preroll_seconds as u64 * 2).max(1);
+    estimated as usize
+}
+
 /// Integration manager for camera and ring buffer coordination
 pub struct CameraRingBufferIntegration {
     camera: CameraInterface,
@@ -21,13 +29,12 @@ impl CameraRingBufferIntegration {
 
         // Calculate ring buffer capacity based on preroll duration and camera FPS
         let preroll_duration = Duration::from_secs(config.event.preroll_seconds as u64);
-        let estimated_capacity =
-            (config.camera.fps as u64 * config.event.preroll_seconds as u64 * 2) as usize;
-        let capacity = estimated_capacity.max(config.system.ring_buffer_capacity);
+        let capacity =
+            calculate_ring_buffer_capacity(config.camera.fps, config.event.preroll_seconds);
 
         debug!(
-            "Ring buffer capacity: {} frames (estimated: {}, configured: {})",
-            capacity, estimated_capacity, config.system.ring_buffer_capacity
+            "Ring buffer capacity: {} frames (fps: {}, preroll: {}, safety_factor: 2)",
+            capacity, config.camera.fps, config.event.preroll_seconds
         );
 
         // Create ring buffer
@@ -321,7 +328,6 @@ mod tests {
             system: SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                ring_buffer_capacity: 150,
                 event_bus_capacity: 100,
             },
         }
