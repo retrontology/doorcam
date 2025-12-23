@@ -138,46 +138,23 @@ impl MotionAnalyzer {
             target_width, target_height
         );
 
-        // Choose pipeline based on configuration and availability
-        let (pipeline, _use_hw) = if self.config.hardware_acceleration {
-            debug!(
-                "Attempting hardware-accelerated motion analysis pipeline: {}",
-                hw_pipeline_desc
-            );
-
-            match gstreamer::parse::launch(&hw_pipeline_desc) {
-                Ok(pipeline) => {
-                    info!("Hardware-accelerated GStreamer pipeline created successfully");
-                    (pipeline, true)
-                }
-                Err(e) => {
-                    warn!("Hardware acceleration not available ({}), falling back to software pipeline", e);
-                    debug!(
-                        "Creating software motion analysis pipeline: {}",
-                        sw_pipeline_desc
-                    );
-
-                    let sw_pipeline = gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| {
-                        AnalyzerError::FrameProcessing {
-                            details: format!("Failed to create software pipeline: {}", e),
-                        }
-                    })?;
-                    (sw_pipeline, false)
-                }
+        // Attempt to use hardware acceleration and fall back to software if unavailable
+        let pipeline = match gstreamer::parse::launch(&hw_pipeline_desc) {
+            Ok(pipeline) => {
+                info!("Hardware-accelerated GStreamer pipeline created successfully");
+                pipeline
             }
-        } else {
-            info!("Hardware acceleration disabled by configuration, using software pipeline");
-            debug!(
-                "Creating software motion analysis pipeline: {}",
-                sw_pipeline_desc
-            );
+            Err(e) => {
+                warn!("Hardware acceleration not available ({}), falling back to software pipeline", e);
+                debug!(
+                    "Creating software motion analysis pipeline: {}",
+                    sw_pipeline_desc
+                );
 
-            let sw_pipeline = gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| {
-                AnalyzerError::FrameProcessing {
+                gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| AnalyzerError::FrameProcessing {
                     details: format!("Failed to create software pipeline: {}", e),
-                }
-            })?;
-            (sw_pipeline, false)
+                })?
+            }
         };
 
         let pipeline =
@@ -658,7 +635,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -676,7 +652,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -686,7 +661,6 @@ mod tests {
             fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
-            hardware_acceleration: false,
             jpeg_decode_scale: 2,
         };
 
@@ -702,7 +676,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 100.0,
-            hardware_acceleration: false, // Disable for synthetic test
             jpeg_decode_scale: 4,
         };
 

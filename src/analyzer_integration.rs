@@ -407,7 +407,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -434,7 +433,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -462,7 +460,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -502,7 +499,6 @@ mod tests {
             fps: 5,
             delta_threshold: 25,
             contour_minimum_area: 1000.0,
-            hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
 
@@ -523,7 +519,6 @@ mod tests {
             fps: 10,
             delta_threshold: 30,
             contour_minimum_area: 2000.0,
-            hardware_acceleration: false,
             jpeg_decode_scale: 4,
         };
 

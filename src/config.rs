@@ -50,10 +50,6 @@ pub struct AnalyzerConfig {
     #[serde(default = "default_contour_area")]
     pub contour_minimum_area: f64,
 
-    /// Enable hardware acceleration for GStreamer pipeline
-    #[serde(default = "default_hardware_acceleration")]
-    pub hardware_acceleration: bool,
-
     /// JPEG decoding resolution scale (1=full, 2=1/2, 4=1/4, 8=1/8)
     #[serde(default = "default_jpeg_decode_scale")]
     pub jpeg_decode_scale: u32,
@@ -194,10 +190,6 @@ impl DoorcamConfig {
             .set_default("analyzer.fps", default_analyzer_fps())?
             .set_default("analyzer.delta_threshold", default_delta_threshold())?
             .set_default("analyzer.contour_minimum_area", default_contour_area())?
-            .set_default(
-                "analyzer.hardware_acceleration",
-                default_hardware_acceleration(),
-            )?
             .set_default("analyzer.jpeg_decode_scale", default_jpeg_decode_scale())?
             .set_default("capture.preroll_seconds", default_preroll_seconds())?
             .set_default("capture.postroll_seconds", default_postroll_seconds())?
@@ -307,7 +299,6 @@ impl Default for DoorcamConfig {
                 fps: default_analyzer_fps(),
                 delta_threshold: default_delta_threshold(),
                 contour_minimum_area: default_contour_area(),
-                hardware_acceleration: default_hardware_acceleration(),
                 jpeg_decode_scale: default_jpeg_decode_scale(),
             },
             capture: CaptureConfig {
@@ -368,9 +359,6 @@ fn default_delta_threshold() -> u32 {
 }
 fn default_contour_area() -> f64 {
     1000.0
-}
-fn default_hardware_acceleration() -> bool {
-    true
 }
 fn default_jpeg_decode_scale() -> u32 {
     4
@@ -461,7 +449,6 @@ mod tests {
                 fps: default_analyzer_fps(),
                 delta_threshold: default_delta_threshold(),
                 contour_minimum_area: default_contour_area(),
-                hardware_acceleration: default_hardware_acceleration(),
                 jpeg_decode_scale: default_jpeg_decode_scale(),
             },
             capture: CaptureConfig {
@@ -529,7 +516,6 @@ mod tests {
                 fps: 5,
                 delta_threshold: 25,
                 contour_minimum_area: 1000.0,
-                hardware_acceleration: true,
                 jpeg_decode_scale: 4,
             },
             capture: CaptureConfig {

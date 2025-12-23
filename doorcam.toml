@@ -26,9 +26,6 @@ delta_threshold = 20
 # Minimum contour area at analysis resolution (camera resolution / jpeg_decode_scale)
 contour_minimum_area = 75.0
 
-# Enable hardware acceleration for GStreamer pipeline (V4L2 on Raspberry Pi)
-hardware_acceleration = true
-
 # Reciprocal decode scale (4 = quarter width/height, aspect preserved)
 jpeg_decode_scale = 4
 
