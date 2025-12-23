@@ -480,8 +480,6 @@ mod tests {
     fn create_test_configs() -> (CaptureConfig, SystemConfig) {
         let temp_dir = TempDir::new().unwrap();
         let capture_config = CaptureConfig {
-            preroll_seconds: 5,
-            postroll_seconds: 10,
             path: temp_dir.path().to_string_lossy().to_string(),
             timestamp_overlay: true,
             timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),

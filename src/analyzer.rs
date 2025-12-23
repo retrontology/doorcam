@@ -145,14 +145,19 @@ impl MotionAnalyzer {
                 pipeline
             }
             Err(e) => {
-                warn!("Hardware acceleration not available ({}), falling back to software pipeline", e);
+                warn!(
+                    "Hardware acceleration not available ({}), falling back to software pipeline",
+                    e
+                );
                 debug!(
                     "Creating software motion analysis pipeline: {}",
                     sw_pipeline_desc
                 );
 
-                gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| AnalyzerError::FrameProcessing {
-                    details: format!("Failed to create software pipeline: {}", e),
+                gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| {
+                    AnalyzerError::FrameProcessing {
+                        details: format!("Failed to create software pipeline: {}", e),
+                    }
                 })?
             }
         };

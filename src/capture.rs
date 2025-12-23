@@ -1,5 +1,5 @@
 use crate::{
-    config::CaptureConfig,
+    config::{CaptureConfig, EventConfig},
     error::{CaptureError, DoorcamError, Result},
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, ProcessedFrame, Rotation as FrameRotation},
@@ -27,6 +27,7 @@ use gstreamer_app::AppSrc;
 /// Video capture system for motion-triggered recording
 pub struct VideoCapture {
     config: CaptureConfig,
+    event_config: EventConfig,
     event_bus: Arc<EventBus>,
     ring_buffer: Arc<RingBuffer>,
     active_captures: Arc<RwLock<Vec<Arc<CaptureEventTask>>>>,
@@ -83,6 +84,7 @@ impl VideoCapture {
     /// Create a new video capture system
     pub fn new(
         config: CaptureConfig,
+        event_config: EventConfig,
         event_bus: Arc<EventBus>,
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
@@ -96,6 +98,7 @@ impl VideoCapture {
 
         Self {
             config,
+            event_config,
             event_bus,
             ring_buffer,
             active_captures: Arc::new(RwLock::new(Vec::new())),
@@ -200,7 +203,7 @@ impl VideoCapture {
 
             info!("Currently {} active capture(s)", captures.len());
 
-            let postroll_duration = Duration::from_secs(self.config.postroll_seconds as u64);
+            let postroll_duration = Duration::from_secs(self.event_config.postroll_seconds as u64);
 
             // Look for an active capture within the postroll window
             for capture_task in captures.iter() {
@@ -268,6 +271,7 @@ impl VideoCapture {
         // Spawn dedicated task for this capture event
         let ring_buffer = Arc::clone(&self.ring_buffer);
         let config = self.config.clone();
+        let event_config = self.event_config.clone();
         let event_bus = Arc::clone(&self.event_bus);
         let video_queue_tx = self.video_queue_tx.clone();
         let active_captures = Arc::clone(&self.active_captures);
@@ -277,6 +281,7 @@ impl VideoCapture {
                 capture_task,
                 ring_buffer,
                 config,
+                event_config,
                 event_bus,
                 video_queue_tx,
                 active_captures,
@@ -295,6 +300,7 @@ impl VideoCapture {
         capture_task: Arc<CaptureEventTask>,
         ring_buffer: Arc<RingBuffer>,
         config: CaptureConfig,
+        event_config: EventConfig,
         event_bus: Arc<EventBus>,
         video_queue_tx: mpsc::UnboundedSender<VideoGenerationJob>,
         active_captures: Arc<RwLock<Vec<Arc<CaptureEventTask>>>>,
@@ -302,8 +308,8 @@ impl VideoCapture {
         let event_id = capture_task.event_id.clone();
         info!("Starting capture event task for {}", event_id);
 
-        let preroll_duration = Duration::from_secs(config.preroll_seconds as u64);
-        let postroll_duration = Duration::from_secs(config.postroll_seconds as u64);
+        let preroll_duration = Duration::from_secs(event_config.preroll_seconds as u64);
+        let postroll_duration = Duration::from_secs(event_config.postroll_seconds as u64);
 
         // Create WAL writer for persistent storage
         let wal_dir = PathBuf::from(&config.path).join("wal");
@@ -402,6 +408,7 @@ impl VideoCapture {
                 postroll_frame_count: total_frames - preroll_count,
                 total_frame_count: total_frames,
                 config: config.clone(),
+                event: event_config.clone(),
             };
 
             if let Err(e) = Self::save_metadata(&metadata, &event_id, &config.path).await {
@@ -1069,6 +1076,7 @@ impl Clone for VideoCapture {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
+            event_config: self.event_config.clone(),
             event_bus: Arc::clone(&self.event_bus),
             ring_buffer: Arc::clone(&self.ring_buffer),
             active_captures: Arc::clone(&self.active_captures),
@@ -1094,23 +1102,22 @@ pub struct CaptureMetadata {
     pub postroll_frame_count: usize,
     pub total_frame_count: usize,
     pub config: CaptureConfig,
+    pub event: EventConfig,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        config::CaptureConfig,
+        config::{CaptureConfig, EventConfig},
         events::EventBus,
         frame::{FrameData, FrameFormat},
         ring_buffer::RingBuffer,
     };
     use std::time::Duration;
 
-    fn create_test_config() -> CaptureConfig {
-        CaptureConfig {
-            preroll_seconds: 2,
-            postroll_seconds: 3,
+    fn create_test_configs() -> (CaptureConfig, EventConfig) {
+        let capture_config = CaptureConfig {
             path: "./test_captures".to_string(),
             timestamp_overlay: true,
             timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
@@ -1119,7 +1126,14 @@ mod tests {
             keep_images: true,
             save_metadata: true,
             rotation: None,
-        }
+        };
+
+        let event_config = EventConfig {
+            preroll_seconds: 2,
+            postroll_seconds: 3,
+        };
+
+        (capture_config, event_config)
     }
 
     fn create_test_frame(id: u64, timestamp: SystemTime) -> FrameData {
@@ -1128,11 +1142,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_capture_creation() {
-        let config = create_test_config();
+        let (capture_config, event_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
-        let capture = VideoCapture::new(config, event_bus, ring_buffer);
+        let capture = VideoCapture::new(capture_config, event_config, event_bus, ring_buffer);
 
         let stats = capture.get_capture_stats().await;
         assert_eq!(stats.active_captures, 0);
@@ -1140,7 +1154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_motion_triggered_capture() {
-        let config = create_test_config();
+        let (capture_config, event_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
@@ -1154,7 +1168,12 @@ mod tests {
             ring_buffer.push_frame(frame).await;
         }
 
-        let capture = VideoCapture::new(config, Arc::clone(&event_bus), ring_buffer);
+        let capture = VideoCapture::new(
+            capture_config,
+            event_config,
+            Arc::clone(&event_bus),
+            ring_buffer,
+        );
 
         // Simulate motion detection
         let motion_time = SystemTime::now();
@@ -1167,10 +1186,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_completion() {
-        let mut config = create_test_config();
-        config.postroll_seconds = 1; // Short postroll for testing
-        config.save_metadata = false; // Disable to avoid filesystem issues in tests
-        config.keep_images = false; // Disable to avoid filesystem issues in tests
+        let (mut capture_config, mut event_config) = create_test_configs();
+        event_config.postroll_seconds = 1; // Short postroll for testing
+        capture_config.save_metadata = false; // Disable to avoid filesystem issues in tests
+        capture_config.keep_images = false; // Disable to avoid filesystem issues in tests
 
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
@@ -1185,7 +1204,12 @@ mod tests {
             ring_buffer.push_frame(frame).await;
         }
 
-        let capture = VideoCapture::new(config, Arc::clone(&event_bus), ring_buffer);
+        let capture = VideoCapture::new(
+            capture_config,
+            event_config,
+            Arc::clone(&event_bus),
+            ring_buffer,
+        );
 
         // Start capture
         let motion_time = now + Duration::from_millis(500);

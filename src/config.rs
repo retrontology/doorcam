@@ -10,6 +10,7 @@ use tracing::{debug, info};
 pub struct DoorcamConfig {
     pub camera: CameraConfig,
     pub analyzer: AnalyzerConfig,
+    pub event: EventConfig,
     pub capture: CaptureConfig,
     pub stream: StreamConfig,
     pub display: DisplayConfig,
@@ -56,7 +57,7 @@ pub struct AnalyzerConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct CaptureConfig {
+pub struct EventConfig {
     /// Preroll duration in seconds
     #[serde(default = "default_preroll_seconds")]
     pub preroll_seconds: u32,
@@ -64,7 +65,10 @@ pub struct CaptureConfig {
     /// Postroll duration in seconds
     #[serde(default = "default_postroll_seconds")]
     pub postroll_seconds: u32,
+}
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CaptureConfig {
     /// Base path for storing captures
     #[serde(default = "default_capture_path")]
     pub path: String,
@@ -191,8 +195,8 @@ impl DoorcamConfig {
             .set_default("analyzer.delta_threshold", default_delta_threshold())?
             .set_default("analyzer.contour_minimum_area", default_contour_area())?
             .set_default("analyzer.jpeg_decode_scale", default_jpeg_decode_scale())?
-            .set_default("capture.preroll_seconds", default_preroll_seconds())?
-            .set_default("capture.postroll_seconds", default_postroll_seconds())?
+            .set_default("event.preroll_seconds", default_preroll_seconds())?
+            .set_default("event.postroll_seconds", default_postroll_seconds())?
             .set_default("capture.path", default_capture_path())?
             .set_default("capture.timestamp_overlay", default_timestamp_overlay())?
             .set_default("capture.timestamp_font_path", default_timestamp_font_path())?
@@ -269,6 +273,19 @@ impl DoorcamConfig {
             ));
         }
 
+        // Validate event timing
+        if self.event.preroll_seconds == 0 {
+            return Err(ConfigError::Message(
+                "Event preroll_seconds must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.event.postroll_seconds == 0 {
+            return Err(ConfigError::Message(
+                "Event postroll_seconds must be greater than 0".to_string(),
+            ));
+        }
+
         // Validate system settings
         if self.system.ring_buffer_capacity == 0 {
             return Err(ConfigError::Message(
@@ -301,9 +318,11 @@ impl Default for DoorcamConfig {
                 contour_minimum_area: default_contour_area(),
                 jpeg_decode_scale: default_jpeg_decode_scale(),
             },
-            capture: CaptureConfig {
+            event: EventConfig {
                 preroll_seconds: default_preroll_seconds(),
                 postroll_seconds: default_postroll_seconds(),
+            },
+            capture: CaptureConfig {
                 path: default_capture_path(),
                 timestamp_overlay: default_timestamp_overlay(),
                 timestamp_font_path: default_timestamp_font_path(),
@@ -451,9 +470,11 @@ mod tests {
                 contour_minimum_area: default_contour_area(),
                 jpeg_decode_scale: default_jpeg_decode_scale(),
             },
-            capture: CaptureConfig {
+            event: EventConfig {
                 preroll_seconds: default_preroll_seconds(),
                 postroll_seconds: default_postroll_seconds(),
+            },
+            capture: CaptureConfig {
                 path: default_capture_path(),
                 timestamp_overlay: default_timestamp_overlay(),
                 timestamp_font_path: default_timestamp_font_path(),
@@ -518,9 +539,11 @@ mod tests {
                 contour_minimum_area: 1000.0,
                 jpeg_decode_scale: 4,
             },
-            capture: CaptureConfig {
+            event: EventConfig {
                 preroll_seconds: 5,
                 postroll_seconds: 10,
+            },
+            capture: CaptureConfig {
                 path: "./captures".to_string(),
                 timestamp_overlay: true,
                 timestamp_font_path: default_timestamp_font_path(),

@@ -70,7 +70,7 @@ impl DoorcamOrchestrator {
         let event_bus = Arc::new(EventBus::new(config.system.event_bus_capacity));
         let ring_buffer = Arc::new(RingBuffer::new(
             config.system.ring_buffer_capacity,
-            Duration::from_secs(config.capture.preroll_seconds as u64),
+            Duration::from_secs(config.event.preroll_seconds as u64),
         ));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
 
@@ -106,6 +106,7 @@ impl DoorcamOrchestrator {
 
         let capture_integration = Some(VideoCaptureIntegration::new(
             config.capture.clone(),
+            config.event.clone(),
             Arc::clone(&event_bus),
             capture_ring_buffer,
         ));
@@ -721,9 +722,11 @@ mod tests {
                 contour_minimum_area: 1000.0,
                 jpeg_decode_scale: 4,
             },
-            capture: crate::config::CaptureConfig {
+            event: crate::config::EventConfig {
                 preroll_seconds: 5,
                 postroll_seconds: 10,
+            },
+            capture: crate::config::CaptureConfig {
                 path: "/tmp/doorcam_test".to_string(),
                 timestamp_overlay: true,
                 timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),

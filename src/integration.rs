@@ -20,9 +20,9 @@ impl CameraRingBufferIntegration {
         info!("Initializing camera-ring buffer integration");
 
         // Calculate ring buffer capacity based on preroll duration and camera FPS
-        let preroll_duration = Duration::from_secs(config.capture.preroll_seconds as u64);
+        let preroll_duration = Duration::from_secs(config.event.preroll_seconds as u64);
         let estimated_capacity =
-            (config.camera.fps as u64 * config.capture.preroll_seconds as u64 * 2) as usize;
+            (config.camera.fps as u64 * config.event.preroll_seconds as u64 * 2) as usize;
         let capacity = estimated_capacity.max(config.system.ring_buffer_capacity);
 
         debug!(
@@ -290,9 +290,11 @@ mod tests {
                 contour_minimum_area: 1000.0,
                 jpeg_decode_scale: 4,
             },
-            capture: CaptureConfig {
+            event: crate::config::EventConfig {
                 preroll_seconds: 5,
                 postroll_seconds: 10,
+            },
+            capture: CaptureConfig {
                 path: "./captures".to_string(),
                 timestamp_overlay: true,
                 timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),

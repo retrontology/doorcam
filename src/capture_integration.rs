@@ -1,6 +1,6 @@
 use crate::{
     capture::{CaptureStats, VideoCapture},
-    config::CaptureConfig,
+    config::{CaptureConfig, EventConfig},
     error::{DoorcamError, Result},
     events::EventBus,
     ring_buffer::RingBuffer,
@@ -12,18 +12,25 @@ use tracing::{info, warn};
 pub struct VideoCaptureIntegration {
     capture: VideoCapture,
     config: CaptureConfig,
+    event_config: EventConfig,
 }
 
 impl VideoCaptureIntegration {
     /// Create a new video capture integration
     pub fn new(
         config: CaptureConfig,
+        event_config: EventConfig,
         event_bus: Arc<EventBus>,
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
-        let capture = VideoCapture::new(config.clone(), event_bus, ring_buffer);
+        let capture =
+            VideoCapture::new(config.clone(), event_config.clone(), event_bus, ring_buffer);
 
-        Self { capture, config }
+        Self {
+            capture,
+            config,
+            event_config,
+        }
     }
 
     /// Start the video capture integration
@@ -60,16 +67,21 @@ impl VideoCaptureIntegration {
         &self.config
     }
 
+    /// Get the event timing configuration
+    pub fn event_config(&self) -> &EventConfig {
+        &self.event_config
+    }
+
     /// Validate the capture configuration
     fn validate_config(&self) -> Result<()> {
-        if self.config.preroll_seconds == 0 {
+        if self.event_config.preroll_seconds == 0 {
             return Err(DoorcamError::component(
                 "video_capture_integration",
                 "Preroll seconds must be greater than 0",
             ));
         }
 
-        if self.config.postroll_seconds == 0 {
+        if self.event_config.postroll_seconds == 0 {
             return Err(DoorcamError::component(
                 "video_capture_integration",
                 "Postroll seconds must be greater than 0",
@@ -95,6 +107,7 @@ impl VideoCaptureIntegration {
 /// Builder for video capture integration
 pub struct VideoCaptureIntegrationBuilder {
     config: Option<CaptureConfig>,
+    event_config: Option<EventConfig>,
     event_bus: Option<Arc<EventBus>>,
     ring_buffer: Option<Arc<RingBuffer>>,
 }
@@ -104,6 +117,7 @@ impl VideoCaptureIntegrationBuilder {
     pub fn new() -> Self {
         Self {
             config: None,
+            event_config: None,
             event_bus: None,
             ring_buffer: None,
         }
@@ -112,6 +126,12 @@ impl VideoCaptureIntegrationBuilder {
     /// Set the capture configuration
     pub fn config(mut self, config: CaptureConfig) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    /// Set the event configuration
+    pub fn event_config(mut self, event_config: EventConfig) -> Self {
+        self.event_config = Some(event_config);
         self
     }
 
@@ -133,6 +153,13 @@ impl VideoCaptureIntegrationBuilder {
             DoorcamError::component("video_capture_integration_builder", "Config is required")
         })?;
 
+        let event_config = self.event_config.ok_or_else(|| {
+            DoorcamError::component(
+                "video_capture_integration_builder",
+                "Event config is required",
+            )
+        })?;
+
         let event_bus = self.event_bus.ok_or_else(|| {
             DoorcamError::component("video_capture_integration_builder", "Event bus is required")
         })?;
@@ -144,7 +171,12 @@ impl VideoCaptureIntegrationBuilder {
             )
         })?;
 
-        Ok(VideoCaptureIntegration::new(config, event_bus, ring_buffer))
+        Ok(VideoCaptureIntegration::new(
+            config,
+            event_config,
+            event_bus,
+            ring_buffer,
+        ))
     }
 }
 
@@ -157,13 +189,15 @@ impl Default for VideoCaptureIntegrationBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::CaptureConfig, events::EventBus, ring_buffer::RingBuffer};
+    use crate::{
+        config::{CaptureConfig, EventConfig},
+        events::EventBus,
+        ring_buffer::RingBuffer,
+    };
     use std::time::Duration;
 
-    fn create_test_config() -> CaptureConfig {
-        CaptureConfig {
-            preroll_seconds: 5,
-            postroll_seconds: 10,
+    fn create_test_configs() -> (CaptureConfig, EventConfig) {
+        let capture_config = CaptureConfig {
             path: "./test_captures".to_string(),
             timestamp_overlay: true,
             timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
@@ -172,35 +206,44 @@ mod tests {
             keep_images: true,
             save_metadata: true,
             rotation: None,
-        }
+        };
+
+        let event_config = EventConfig {
+            preroll_seconds: 5,
+            postroll_seconds: 10,
+        };
+
+        (capture_config, event_config)
     }
 
     #[tokio::test]
     async fn test_integration_creation() {
-        let config = create_test_config();
+        let (capture_config, event_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
-        let integration = VideoCaptureIntegration::new(config, event_bus, ring_buffer);
+        let integration =
+            VideoCaptureIntegration::new(capture_config, event_config, event_bus, ring_buffer);
 
-        assert_eq!(integration.config().preroll_seconds, 5);
-        assert_eq!(integration.config().postroll_seconds, 10);
+        assert_eq!(integration.event_config().preroll_seconds, 5);
+        assert_eq!(integration.event_config().postroll_seconds, 10);
     }
 
     #[tokio::test]
     async fn test_builder_pattern() {
-        let config = create_test_config();
+        let (capture_config, event_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration = VideoCaptureIntegrationBuilder::new()
-            .config(config)
+            .config(capture_config)
+            .event_config(event_config.clone())
             .event_bus(event_bus)
             .ring_buffer(ring_buffer)
             .build()
             .unwrap();
 
-        assert_eq!(integration.config().preroll_seconds, 5);
+        assert_eq!(integration.event_config().preroll_seconds, 5);
     }
 
     #[tokio::test]
@@ -210,8 +253,11 @@ mod tests {
         assert!(result.is_err());
 
         // Missing event bus
-        let config = create_test_config();
-        let result = VideoCaptureIntegrationBuilder::new().config(config).build();
+        let (capture_config, event_config) = create_test_configs();
+        let result = VideoCaptureIntegrationBuilder::new()
+            .config(capture_config)
+            .event_config(event_config)
+            .build();
         assert!(result.is_err());
     }
 
@@ -221,36 +267,50 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         // Invalid config - zero preroll
-        let mut invalid_config = create_test_config();
-        invalid_config.preroll_seconds = 0;
+        let (capture_config, mut event_config) = create_test_configs();
+        event_config.preroll_seconds = 0;
 
-        let integration =
-            VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
+        let integration = VideoCaptureIntegration::new(
+            capture_config.clone(),
+            event_config,
+            event_bus.clone(),
+            ring_buffer.clone(),
+        );
         assert!(integration.validate_config().is_err());
 
         // Invalid config - zero postroll
-        let mut invalid_config = create_test_config();
-        invalid_config.postroll_seconds = 0;
+        let (capture_config, mut event_config) = create_test_configs();
+        event_config.postroll_seconds = 0;
 
-        let integration =
-            VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
+        let integration = VideoCaptureIntegration::new(
+            capture_config.clone(),
+            event_config,
+            event_bus.clone(),
+            ring_buffer.clone(),
+        );
         assert!(integration.validate_config().is_err());
 
         // Invalid config - empty path
-        let mut invalid_config = create_test_config();
-        invalid_config.path = String::new();
+        let (mut invalid_capture_config, event_config) = create_test_configs();
+        invalid_capture_config.path = String::new();
 
-        let integration = VideoCaptureIntegration::new(invalid_config, event_bus, ring_buffer);
+        let integration = VideoCaptureIntegration::new(
+            invalid_capture_config,
+            event_config,
+            event_bus,
+            ring_buffer,
+        );
         assert!(integration.validate_config().is_err());
     }
 
     #[tokio::test]
     async fn test_stats() {
-        let config = create_test_config();
+        let (capture_config, event_config) = create_test_configs();
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
-        let integration = VideoCaptureIntegration::new(config, event_bus, ring_buffer);
+        let integration =
+            VideoCaptureIntegration::new(capture_config, event_config, event_bus, ring_buffer);
 
         let stats = integration.get_stats().await;
         assert_eq!(stats.active_captures, 0);

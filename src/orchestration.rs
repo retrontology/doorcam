@@ -63,9 +63,11 @@ mod tests {
                 contour_minimum_area: 1000.0,
                 jpeg_decode_scale: 4,
             },
-            capture: crate::config::CaptureConfig {
+            event: crate::config::EventConfig {
                 preroll_seconds: 5,
                 postroll_seconds: 10,
+            },
+            capture: crate::config::CaptureConfig {
                 path: "/tmp/doorcam_test".to_string(),
                 timestamp_overlay: true,
                 timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),

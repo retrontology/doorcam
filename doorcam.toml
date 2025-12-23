@@ -29,13 +29,15 @@ contour_minimum_area = 75.0
 # Reciprocal decode scale (4 = quarter width/height, aspect preserved)
 jpeg_decode_scale = 4
 
-[capture]
-# Preroll duration in seconds (how much video before motion to save)
+[event]
+# Shared event timing (applies to capture and display behaviors)
+# Preroll duration in seconds (how much video before motion to save/show)
 preroll_seconds = 5
 
-# Postroll duration in seconds (how long to record after motion stops)
+# Postroll duration in seconds (how long to record/display after motion stops)
 postroll_seconds = 10
 
+[capture]
 # Base directory for storing captured events
 path = "./captures"
 
@@ -99,7 +101,7 @@ retention_days = 7
 
 # Ring buffer capacity (number of frames to keep in memory)
 # Higher values = more preroll capability but more memory usage
-# Calculate as: preroll_seconds * camera_fps * safety_factor
+# Calculate as: event.preroll_seconds * camera_fps * safety_factor
 ring_buffer_capacity = 150
 
 # Event bus capacity (number of events that can be queued)
@@ -111,3 +113,5 @@ event_bus_capacity = 100
 # DOORCAM_STREAM_PORT=9090
 # DOORCAM_CAPTURE_PATH="/var/lib/doorcam/captures"
 # DOORCAM_SYSTEM_TRIM_OLD=false
+# DOORCAM_EVENT_PREROLL_SECONDS=3
+# DOORCAM_EVENT_POSTROLL_SECONDS=8
