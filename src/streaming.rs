@@ -515,7 +515,7 @@ mod tests {
             rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let server = StreamServerBuilder::new()
             .config(config)
@@ -590,7 +590,7 @@ mod tests {
         // Missing config
         let result = StreamServerBuilder::new()
             .ring_buffer(Arc::new(RingBuffer::new(10, Duration::from_secs(1))))
-            .event_bus(Arc::new(EventBus::new(10)))
+            .event_bus(Arc::new(EventBus::new()))
             .build();
         assert!(result.is_err());
 
@@ -601,7 +601,7 @@ mod tests {
                 port: 8080,
                 rotation: None,
             })
-            .event_bus(Arc::new(EventBus::new(10)))
+            .event_bus(Arc::new(EventBus::new()))
             .target_fps(30)
             .build();
         assert!(result.is_err());
@@ -623,7 +623,7 @@ mod tests {
     #[tokio::test]
     async fn test_streaming_integration() {
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        let _event_bus = Arc::new(EventBus::new(10));
+        let _event_bus = Arc::new(EventBus::new());
 
         // Add a test frame to the ring buffer
         let frame = create_test_frame(1, FrameFormat::Mjpeg);

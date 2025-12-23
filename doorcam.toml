@@ -99,9 +99,6 @@ trim_old = true
 # How many days to keep capture events (if trim_old is enabled)
 retention_days = 7
 
-# Event bus capacity (number of events that can be queued)
-event_bus_capacity = 100
-
 # Example environment variable overrides:
 # DOORCAM_CAMERA_INDEX=1
 # DOORCAM_CAMERA_RESOLUTION="[1280, 720]"

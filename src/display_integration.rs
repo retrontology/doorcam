@@ -448,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_integration_creation() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = DisplayIntegration::new(config, event_bus).await;
         assert!(integration.is_ok());
@@ -457,7 +457,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_integration_builder() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = DisplayIntegrationBuilder::new()
             .with_config(config)
@@ -473,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_activation_events() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let mut receiver = event_bus.subscribe();
 
         let integration = DisplayIntegration::new(config, Arc::clone(&event_bus))
@@ -516,7 +516,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_integration_with_stats() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration_with_stats = DisplayIntegrationWithStats::new(config, event_bus).await;
         assert!(integration_with_stats.is_ok());
@@ -533,7 +533,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_touch_integration() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(
             RingBufferBuilder::new()
                 .capacity(10)

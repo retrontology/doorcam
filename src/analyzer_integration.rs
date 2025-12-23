@@ -416,7 +416,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration =
             MotionAnalyzerIntegration::new(config, Arc::new(ring_buffer), event_bus).await;
@@ -442,7 +442,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = MotionAnalyzerIntegrationBuilder::new()
             .with_config(config)
@@ -469,7 +469,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
 
         let mut integration =
             MotionAnalyzerIntegration::new(config, Arc::new(ring_buffer), event_bus)
@@ -508,7 +508,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration =
             MotionAnalyzerIntegration::new(initial_config, Arc::new(ring_buffer), event_bus)

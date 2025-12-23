@@ -143,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_keyboard_handler_creation() {
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
         let handler = KeyboardInputHandler::new(event_bus);
 
         // Just verify we can create the handler
@@ -152,7 +152,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_keyboard_handler_stop() {
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
         let handler = KeyboardInputHandler::new(event_bus);
 
         handler.stop().await.unwrap();

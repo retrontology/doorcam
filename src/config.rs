@@ -154,10 +154,6 @@ pub struct SystemConfig {
     /// Retention period in days
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
-
-    /// Event bus capacity
-    #[serde(default = "default_event_bus_capacity")]
-    pub event_bus_capacity: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -225,10 +221,6 @@ impl DoorcamConfig {
             )?
             .set_default("system.trim_old", default_trim_old())?
             .set_default("system.retention_days", default_retention_days())?
-            .set_default(
-                "system.event_bus_capacity",
-                default_event_bus_capacity() as i64,
-            )?
             // Add configuration file (optional)
             .add_source(File::with_name(&path_str).required(false))
             // Add environment variables with DOORCAM_ prefix
@@ -279,12 +271,6 @@ impl DoorcamConfig {
         }
 
         // Validate system settings
-        if self.system.event_bus_capacity == 0 {
-            return Err(ConfigError::Message(
-                "Event bus capacity must be greater than 0".to_string(),
-            ));
-        }
-
         Ok(())
     }
 }
@@ -335,7 +321,6 @@ impl Default for DoorcamConfig {
             system: SystemConfig {
                 trim_old: default_trim_old(),
                 retention_days: default_retention_days(),
-                event_bus_capacity: default_event_bus_capacity(),
             },
         }
     }
@@ -428,9 +413,6 @@ fn default_trim_old() -> bool {
 fn default_retention_days() -> u32 {
     7
 }
-fn default_event_bus_capacity() -> usize {
-    100
-}
 
 #[cfg(test)]
 mod tests {
@@ -483,7 +465,6 @@ mod tests {
             system: SystemConfig {
                 trim_old: default_trim_old(),
                 retention_days: default_retention_days(),
-                event_bus_capacity: default_event_bus_capacity(),
             },
         };
 
@@ -551,7 +532,6 @@ mod tests {
             system: SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                event_bus_capacity: 100,
             },
         };
 

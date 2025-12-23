@@ -219,7 +219,7 @@ mod tests {
     #[tokio::test]
     async fn test_integration_creation() {
         let (capture_config, event_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration =
@@ -232,7 +232,7 @@ mod tests {
     #[tokio::test]
     async fn test_builder_pattern() {
         let (capture_config, event_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration = VideoCaptureIntegrationBuilder::new()
@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_validation() {
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         // Invalid config - zero preroll
@@ -306,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn test_stats() {
         let (capture_config, event_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration =

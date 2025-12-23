@@ -1362,7 +1362,6 @@ mod tests {
         let system_config = SystemConfig {
             trim_old: true,
             retention_days: 7,
-            event_bus_capacity: 100,
         };
 
         (capture_config, system_config)
@@ -1371,7 +1370,7 @@ mod tests {
     #[tokio::test]
     async fn test_event_storage_creation() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
@@ -1382,7 +1381,7 @@ mod tests {
     #[tokio::test]
     async fn test_directory_name_validation() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
         assert!(storage.is_valid_event_directory_name("20231019_143022_123"));
@@ -1394,7 +1393,7 @@ mod tests {
     #[tokio::test]
     async fn test_timestamp_parsing() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
         let timestamp = storage
@@ -1424,7 +1423,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_stats() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
         // Initially empty
@@ -1438,7 +1437,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_status() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
         let status = storage.get_cleanup_status().await;
@@ -1452,7 +1451,7 @@ mod tests {
     #[tokio::test]
     async fn test_dry_run_cleanup() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let storage = EventStorage::new(capture_config, system_config, event_bus);
 
         let result = storage.dry_run_cleanup().await.unwrap();
@@ -1464,7 +1463,7 @@ mod tests {
     #[tokio::test]
     async fn test_validation_safety() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let capture_path = PathBuf::from(&capture_config.path);
 
         // Create the capture directory so it exists for validation

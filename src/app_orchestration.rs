@@ -68,7 +68,7 @@ pub struct DoorcamOrchestrator {
 impl DoorcamOrchestrator {
     /// Create a new orchestrator with the given configuration
     pub async fn new(config: DoorcamConfig) -> Result<Self> {
-        let event_bus = Arc::new(EventBus::new(config.system.event_bus_capacity));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer_capacity =
             calculate_ring_buffer_capacity(config.camera.fps, config.event.preroll_seconds);
         let ring_buffer = Arc::new(RingBuffer::new(
@@ -742,7 +742,6 @@ mod tests {
             system: crate::config::SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                event_bus_capacity: 100,
             },
             stream: crate::config::StreamConfig {
                 ip: "127.0.0.1".to_string(),

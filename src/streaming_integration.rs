@@ -373,7 +373,7 @@ mod tests {
             rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = StreamingIntegration::new(config, ring_buffer, event_bus, 30);
         assert!(integration.is_ok());
@@ -430,7 +430,7 @@ mod tests {
             rotation: None,
         };
         let ring_buffer = Arc::new(RingBuffer::new(10, Duration::from_secs(1)));
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = StreamingIntegration::new(config, ring_buffer, event_bus, 30).unwrap();
 

@@ -80,7 +80,6 @@ mod tests {
             system: crate::config::SystemConfig {
                 trim_old: true,
                 retention_days: 7,
-                event_bus_capacity: 100,
             },
             #[cfg(feature = "streaming")]
             stream: crate::config::StreamConfig {

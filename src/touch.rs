@@ -900,7 +900,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_touch_handler() {
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let mut receiver = event_bus.subscribe();
 
         let mock_handler = MockTouchInputHandler::new(Arc::clone(&event_bus));
@@ -983,7 +983,7 @@ mod tests {
     #[tokio::test]
     async fn test_touch_handler_creation() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let handler = TouchInputHandler::new(&config, Arc::clone(&event_bus));
         assert_eq!(handler.device_path, "/dev/input/event0");
@@ -992,7 +992,7 @@ mod tests {
     #[tokio::test]
     async fn test_advanced_touch_handler_creation() {
         let config = create_test_config();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let mut handler = AdvancedTouchInputHandler::new(&config, Arc::clone(&event_bus));
         handler.set_debounce_duration(Duration::from_millis(100));

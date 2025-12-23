@@ -1143,7 +1143,7 @@ mod tests {
     #[tokio::test]
     async fn test_video_capture_creation() {
         let (capture_config, event_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let capture = VideoCapture::new(capture_config, event_config, event_bus, ring_buffer);
@@ -1155,7 +1155,7 @@ mod tests {
     #[tokio::test]
     async fn test_motion_triggered_capture() {
         let (capture_config, event_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         // Add a subscriber to prevent channel closed error
@@ -1191,7 +1191,7 @@ mod tests {
         capture_config.save_metadata = false; // Disable to avoid filesystem issues in tests
         capture_config.keep_images = false; // Disable to avoid filesystem issues in tests
 
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         // Add a subscriber to prevent channel closed error

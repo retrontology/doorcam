@@ -122,6 +122,9 @@ impl DoorcamEvent {
     }
 }
 
+/// Default broadcast channel capacity for the event bus
+pub const EVENT_BUS_CAPACITY: usize = 100;
+
 /// Async event bus for component coordination using broadcast channels
 pub struct EventBus {
     sender: broadcast::Sender<DoorcamEvent>,
@@ -129,9 +132,9 @@ pub struct EventBus {
 }
 
 impl EventBus {
-    /// Create a new event bus with the specified channel capacity
-    pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
+    /// Create a new event bus with the default channel capacity
+    pub fn new() -> Self {
+        let (sender, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         Self {
             sender,
             debug_logging: false,
@@ -139,8 +142,8 @@ impl EventBus {
     }
 
     /// Create a new event bus with debug logging enabled
-    pub fn with_debug_logging(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
+    pub fn with_debug_logging() -> Self {
+        let (sender, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         Self {
             sender,
             debug_logging: true,
@@ -331,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_bus_basic_operations() {
-        let event_bus = EventBus::new(10);
+        let event_bus = EventBus::new();
         let mut receiver = event_bus.subscribe();
 
         let event = DoorcamEvent::MotionDetected {
@@ -355,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_subscribers() {
-        let event_bus = EventBus::new(10);
+        let event_bus = EventBus::new();
         let mut receiver1 = event_bus.subscribe();
         let mut receiver2 = event_bus.subscribe();
 
@@ -398,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filtered_receiver() {
-        let event_bus = EventBus::new(10);
+        let event_bus = EventBus::new();
         let receiver = event_bus.subscribe();
         let filter = EventFilter::EventTypes(vec!["motion_detected"]);
         let mut filtered_receiver = EventReceiver::new(receiver, filter, "test".to_string());
@@ -865,8 +868,8 @@ mod pattern_tests {
 
     #[tokio::test]
     async fn test_forwarding_handler() {
-        let _source_bus = Arc::new(EventBus::new(10));
-        let target_bus = Arc::new(EventBus::new(10));
+        let _source_bus = Arc::new(EventBus::new());
+        let target_bus = Arc::new(EventBus::new());
         let mut target_receiver = target_bus.subscribe();
 
         let mut handler = create_forwarding_handler(
@@ -936,7 +939,7 @@ mod pattern_tests {
         use std::sync::Arc;
         use tokio::time::Duration;
 
-        let event_bus = Arc::new(EventBus::new(1000));
+        let event_bus = Arc::new(EventBus::new());
         let mut handles = Vec::new();
 
         // Spawn multiple publishers
@@ -994,7 +997,7 @@ mod pattern_tests {
 
     #[tokio::test]
     async fn test_event_error_handling() {
-        let event_bus = EventBus::new(10); // Small buffer to test overflow
+        let event_bus = EventBus::new(); // Small buffer to test overflow
 
         // Create a subscriber first so events can be published
         let _receiver = event_bus.subscribe();

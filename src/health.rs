@@ -342,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_health_manager() {
-        let event_bus = Arc::new(EventBus::new(100));
+        let event_bus = Arc::new(EventBus::new());
         let health_manager = SystemHealthManager::new(event_bus);
 
         // Initial system health should be unknown

@@ -493,7 +493,6 @@ mod tests {
         let system_config = SystemConfig {
             trim_old: true,
             retention_days: 7,
-            event_bus_capacity: 100,
         };
 
         (capture_config, system_config)
@@ -502,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_integration_builder() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = EventStorageIntegration::builder()
             .with_capture_config(capture_config)
@@ -517,7 +516,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_integration_lifecycle() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = EventStorageIntegration::builder()
             .with_capture_config(capture_config)
@@ -544,7 +543,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_integration_stats() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = EventStorageIntegration::builder()
             .with_capture_config(capture_config)
@@ -562,7 +561,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_status() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = EventStorageIntegration::builder()
             .with_capture_config(capture_config)
@@ -581,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_operations() {
         let (capture_config, system_config) = create_test_configs();
-        let event_bus = Arc::new(EventBus::new(10));
+        let event_bus = Arc::new(EventBus::new());
 
         let integration = EventStorageIntegration::builder()
             .with_capture_config(capture_config)
