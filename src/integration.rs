@@ -323,7 +323,6 @@ mod tests {
                 activation_period_seconds: 30,
                 resolution: (800, 480),
                 rotation: None,
-                jpeg_decode_scale: 4,
             },
             system: SystemConfig {
                 trim_old: true,

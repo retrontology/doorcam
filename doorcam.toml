@@ -89,9 +89,6 @@ activation_period_seconds = 30
 # Optional display rotation - uncomment to enable
 # rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
 
-# Decode scale for display (reciprocal; 4 = quarter width/height)
-jpeg_decode_scale = 4
-
 [system]
 # Enable automatic cleanup of old capture events
 trim_old = true

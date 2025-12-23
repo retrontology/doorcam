@@ -80,11 +80,6 @@ impl DisplayController {
             }
         };
 
-        info!(
-            "Using display JPEG decode scale 1/{}",
-            self.config.jpeg_decode_scale
-        );
-
         // Build hardware-accelerated display pipeline with efficient JPEG decoding
         // Note: Using software jpegdec for display - v4l2jpegdec causes pipeline stalls
         // Hardware decoder works fine for video encoding but not for live display
@@ -734,7 +729,6 @@ mod tests {
             activation_period_seconds: 5,
             resolution: (800, 480),
             rotation: None,
-            jpeg_decode_scale: 4,
         }
     }
 

@@ -139,10 +139,6 @@ pub struct DisplayConfig {
 
     /// Display rotation
     pub rotation: Option<Rotation>,
-
-    /// JPEG decoding resolution scale for display (1=full, 2=1/2, 4=1/4, 8=1/8)
-    #[serde(default = "default_display_jpeg_decode_scale")]
-    pub jpeg_decode_scale: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -214,10 +210,6 @@ impl DoorcamConfig {
                     default_display_resolution().0,
                     default_display_resolution().1,
                 ],
-            )?
-            .set_default(
-                "display.jpeg_decode_scale",
-                default_display_jpeg_decode_scale(),
             )?
             .set_default("system.trim_old", default_trim_old())?
             .set_default("system.retention_days", default_retention_days())?
@@ -316,7 +308,6 @@ impl Default for DoorcamConfig {
                 activation_period_seconds: default_activation_period(),
                 resolution: default_display_resolution(),
                 rotation: None,
-                jpeg_decode_scale: default_display_jpeg_decode_scale(),
             },
             system: SystemConfig {
                 trim_old: default_trim_old(),
@@ -403,9 +394,6 @@ fn default_activation_period() -> u32 {
 fn default_display_resolution() -> (u32, u32) {
     (800, 480)
 }
-fn default_display_jpeg_decode_scale() -> u32 {
-    4
-} // Default to 1/4 resolution for efficiency
 
 fn default_trim_old() -> bool {
     true
@@ -460,7 +448,6 @@ mod tests {
                 activation_period_seconds: default_activation_period(),
                 resolution: default_display_resolution(),
                 rotation: None,
-                jpeg_decode_scale: default_display_jpeg_decode_scale(),
             },
             system: SystemConfig {
                 trim_old: default_trim_old(),
@@ -527,7 +514,6 @@ mod tests {
                 activation_period_seconds: 30,
                 resolution: (800, 480),
                 rotation: None,
-                jpeg_decode_scale: 4,
             },
             system: SystemConfig {
                 trim_old: true,

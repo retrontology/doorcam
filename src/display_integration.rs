@@ -441,7 +441,6 @@ mod tests {
             activation_period_seconds: 5,
             resolution: (800, 480),
             rotation: None,
-            jpeg_decode_scale: 4,
         }
     }
 
