@@ -1,10 +1,10 @@
 use crate::config::DisplayConfig;
 use crate::display::DisplayController;
-use crate::touch::{TouchInputHandler, MockTouchInputHandler};
-use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
+use crate::events::{DoorcamEvent, EventBus, EventFilter, EventReceiver};
+use crate::touch::{MockTouchInputHandler, TouchInputHandler};
 
-use crate::ring_buffer::RingBuffer;
 use crate::error::{DoorcamError, Result};
+use crate::ring_buffer::RingBuffer;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::time::{interval, sleep};
@@ -23,10 +23,7 @@ pub struct DisplayIntegration {
 
 impl DisplayIntegration {
     /// Create a new display integration
-    pub async fn new(
-        config: DisplayConfig,
-        event_bus: Arc<EventBus>,
-    ) -> Result<Self> {
+    pub async fn new(config: DisplayConfig, event_bus: Arc<EventBus>) -> Result<Self> {
         info!("Initializing display integration");
 
         let display_controller = DisplayController::new(config.clone()).await?;
@@ -49,10 +46,7 @@ impl DisplayIntegration {
     }
 
     /// Start the display integration with all components
-    pub async fn start(
-        &self,
-        ring_buffer: Arc<RingBuffer>,
-    ) -> Result<()> {
+    pub async fn start(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
         let mut is_running = self.is_running.write().await;
         if *is_running {
             info!("Display integration is already running");
@@ -62,7 +56,9 @@ impl DisplayIntegration {
         info!("Starting display integration");
 
         // Start display controller
-        self.display_controller.start(Arc::clone(&self.event_bus)).await?;
+        self.display_controller
+            .start(Arc::clone(&self.event_bus))
+            .await?;
 
         // Start touch input handler
         let touch_task = if self.use_mock_touch {
@@ -121,15 +117,17 @@ impl DisplayIntegration {
                         // Only render if we have a new frame to avoid unnecessary work
                         if frame.id > last_frame_id {
                             last_frame_id = frame.id;
-                            
+
                             if let Err(e) = display_controller.render_frame(&frame).await {
                                 error!("Failed to render frame to display: {}", e);
-                                
+
                                 // Publish error event
-                                let _ = event_bus.publish(DoorcamEvent::SystemError {
-                                    component: "display_rendering".to_string(),
-                                    error: e.to_string(),
-                                }).await;
+                                let _ = event_bus
+                                    .publish(DoorcamEvent::SystemError {
+                                        component: "display_rendering".to_string(),
+                                        error: e.to_string(),
+                                    })
+                                    .await;
                             }
                         }
                     }
@@ -157,20 +155,30 @@ impl DisplayIntegration {
 
     /// Manually activate display
     pub async fn activate_display(&self) -> Result<()> {
-        self.event_bus.publish(DoorcamEvent::DisplayActivate {
-            timestamp: SystemTime::now(),
-            duration_seconds: self.config.activation_period_seconds,
-        }).await.map_err(|e| DoorcamError::component("display_integration".to_string(), e.to_string()))?;
-        
+        self.event_bus
+            .publish(DoorcamEvent::DisplayActivate {
+                timestamp: SystemTime::now(),
+                duration_seconds: self.config.activation_period_seconds,
+            })
+            .await
+            .map_err(|e| {
+                DoorcamError::component("display_integration".to_string(), e.to_string())
+            })?;
+
         Ok(())
     }
 
     /// Manually deactivate display
     pub async fn deactivate_display(&self) -> Result<()> {
-        self.event_bus.publish(DoorcamEvent::DisplayDeactivate {
-            timestamp: SystemTime::now(),
-        }).await.map_err(|e| DoorcamError::component("display_integration".to_string(), e.to_string()))?;
-        
+        self.event_bus
+            .publish(DoorcamEvent::DisplayDeactivate {
+                timestamp: SystemTime::now(),
+            })
+            .await
+            .map_err(|e| {
+                DoorcamError::component("display_integration".to_string(), e.to_string())
+            })?;
+
         Ok(())
     }
 
@@ -254,15 +262,21 @@ impl DisplayIntegrationBuilder {
     /// Build the display integration
     pub async fn build(self) -> Result<DisplayIntegration> {
         let config = self.config.ok_or_else(|| {
-            DoorcamError::component("display_integration_builder".to_string(), "Display config is required".to_string())
+            DoorcamError::component(
+                "display_integration_builder".to_string(),
+                "Display config is required".to_string(),
+            )
         })?;
 
         let event_bus = self.event_bus.ok_or_else(|| {
-            DoorcamError::component("display_integration_builder".to_string(), "Event bus is required".to_string())
+            DoorcamError::component(
+                "display_integration_builder".to_string(),
+                "Event bus is required".to_string(),
+            )
         })?;
 
         let mut integration = DisplayIntegration::new(config, event_bus).await?;
-        
+
         if self.use_mock_touch {
             integration = integration.with_mock_touch();
         }
@@ -335,17 +349,11 @@ pub struct DisplayIntegrationWithStats {
 
 impl DisplayIntegrationWithStats {
     /// Create a new display integration with statistics
-    pub async fn new(
-        config: DisplayConfig,
-        event_bus: Arc<EventBus>,
-    ) -> Result<Self> {
+    pub async fn new(config: DisplayConfig, event_bus: Arc<EventBus>) -> Result<Self> {
         let integration = DisplayIntegration::new(config, event_bus).await?;
         let stats = Arc::new(tokio::sync::RwLock::new(DisplayStats::default()));
 
-        Ok(Self {
-            integration,
-            stats,
-        })
+        Ok(Self { integration, stats })
     }
 
     /// Start with statistics tracking
@@ -366,11 +374,8 @@ impl DisplayIntegrationWithStats {
 
         // Subscribe to events for statistics
         let receiver = event_bus.subscribe();
-        let filter = EventFilter::EventTypes(vec![
-            "touch_detected",
-            "display_activate",
-            "system_error",
-        ]);
+        let filter =
+            EventFilter::EventTypes(vec!["touch_detected", "display_activate", "system_error"]);
         let mut event_receiver = EventReceiver::new(receiver, filter, "display_stats".to_string());
 
         tokio::spawn(async move {
@@ -444,7 +449,7 @@ mod tests {
     async fn test_display_integration_creation() {
         let config = create_test_config();
         let event_bus = Arc::new(EventBus::new(10));
-        
+
         let integration = DisplayIntegration::new(config, event_bus).await;
         assert!(integration.is_ok());
     }
@@ -453,7 +458,7 @@ mod tests {
     async fn test_display_integration_builder() {
         let config = create_test_config();
         let event_bus = Arc::new(EventBus::new(10));
-        
+
         let integration = DisplayIntegrationBuilder::new()
             .with_config(config)
             .with_event_bus(event_bus)
@@ -461,7 +466,7 @@ mod tests {
             .with_render_fps(60)
             .build()
             .await;
-        
+
         assert!(integration.is_ok());
     }
 
@@ -470,14 +475,19 @@ mod tests {
         let config = create_test_config();
         let event_bus = Arc::new(EventBus::new(10));
         let mut receiver = event_bus.subscribe();
-        
-        let integration = DisplayIntegration::new(config, Arc::clone(&event_bus)).await.unwrap();
-        
+
+        let integration = DisplayIntegration::new(config, Arc::clone(&event_bus))
+            .await
+            .unwrap();
+
         // Activate display
         integration.activate_display().await.unwrap();
-        
+
         // Should receive activation event
-        let event = timeout(Duration::from_millis(100), receiver.recv()).await.unwrap().unwrap();
+        let event = timeout(Duration::from_millis(100), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
         match event {
             DoorcamEvent::DisplayActivate { .. } => {
                 // Success
@@ -489,16 +499,16 @@ mod tests {
     #[tokio::test]
     async fn test_display_stats() {
         let mut stats = DisplayStats::default();
-        
+
         stats.record_frame_render();
         stats.record_touch_event();
         stats.record_activation();
-        
+
         assert_eq!(stats.frames_rendered, 1);
         assert_eq!(stats.touch_events, 1);
         assert_eq!(stats.activation_count, 1);
         assert_eq!(stats.render_success_rate(), 1.0);
-        
+
         stats.record_render_error();
         assert!(stats.render_success_rate() < 1.0);
     }
@@ -507,13 +517,13 @@ mod tests {
     async fn test_display_integration_with_stats() {
         let config = create_test_config();
         let event_bus = Arc::new(EventBus::new(10));
-        
+
         let integration_with_stats = DisplayIntegrationWithStats::new(config, event_bus).await;
         assert!(integration_with_stats.is_ok());
-        
+
         let integration = integration_with_stats.unwrap();
         let stats = integration.get_stats().await;
-        
+
         // Initial stats should be zero
         assert_eq!(stats.frames_rendered, 0);
         assert_eq!(stats.touch_events, 0);
@@ -529,20 +539,21 @@ mod tests {
                 .capacity(10)
                 .preroll_duration(Duration::from_secs(5))
                 .build()
-                .unwrap()
+                .unwrap(),
         );
-        
+
         let integration = DisplayIntegration::new(config, event_bus)
             .await
             .unwrap()
             .with_mock_touch();
-        
+
         // Test that start() returns Ok without actually running the infinite loops
         // We use a timeout to ensure the test doesn't hang
         let start_result = timeout(Duration::from_millis(100), async {
             integration.start(ring_buffer).await
-        }).await;
-        
+        })
+        .await;
+
         // The start should complete quickly (just spawning tasks, not running them)
         assert!(start_result.is_ok());
         assert!(start_result.unwrap().is_ok());

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use tracing::{info, error};
+use tracing::{error, info};
 
 mod config;
 mod error;
@@ -10,12 +10,19 @@ use doorcam::{DoorcamConfig, DoorcamOrchestrator};
 #[command(name = "doorcam")]
 #[command(about = "Rust-based door camera system with motion detection and streaming")]
 #[command(version)]
-#[command(long_about = "A Rust-based door camera system that provides motion detection, \
+#[command(
+    long_about = "A Rust-based door camera system that provides motion detection, \
 video capture, live streaming, and display functionality for door monitoring applications. \
-Supports hardware acceleration on Raspberry Pi and integrates with systemd for service management.")]
+Supports hardware acceleration on Raspberry Pi and integrates with systemd for service management."
+)]
 struct Args {
     /// Path to configuration file
-    #[arg(short, long, default_value = "doorcam.toml", help = "Path to TOML configuration file")]
+    #[arg(
+        short,
+        long,
+        default_value = "doorcam.toml",
+        help = "Path to TOML configuration file"
+    )]
     config: String,
 
     /// Enable debug logging (most verbose)
@@ -31,7 +38,10 @@ struct Args {
     quiet: bool,
 
     /// Validate configuration and exit
-    #[arg(long, help = "Validate configuration file and exit without starting the system")]
+    #[arg(
+        long,
+        help = "Validate configuration file and exit without starting the system"
+    )]
     validate_config: bool,
 
     /// Print default configuration and exit
@@ -39,11 +49,18 @@ struct Args {
     print_config: bool,
 
     /// Dry run mode - initialize but don't start components
-    #[arg(long, help = "Perform dry run - initialize components but don't start them")]
+    #[arg(
+        long,
+        help = "Perform dry run - initialize components but don't start them"
+    )]
     dry_run: bool,
 
     /// Override log format (json, pretty, compact)
-    #[arg(long, value_name = "FORMAT", help = "Log output format: json, pretty, or compact")]
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        help = "Log output format: json, pretty, or compact"
+    )]
     log_format: Option<String>,
 
     /// Enable systemd journal integration
@@ -51,7 +68,10 @@ struct Args {
     systemd: bool,
 
     /// Enable keyboard input for debugging (SPACE=motion, Q/ESC=quit)
-    #[arg(long, help = "Enable keyboard input handler for debugging motion events")]
+    #[arg(
+        long,
+        help = "Enable keyboard input handler for debugging motion events"
+    )]
     enable_keyboard: bool,
 }
 
@@ -102,11 +122,10 @@ async fn main() -> Result<()> {
     info!("Doorcam configuration loaded and validated");
 
     // Create and initialize the orchestrator
-    let mut orchestrator = DoorcamOrchestrator::new(config).await
-        .map_err(|e| {
-            error!("Failed to create orchestrator: {}", e);
-            e
-        })?;
+    let mut orchestrator = DoorcamOrchestrator::new(config).await.map_err(|e| {
+        error!("Failed to create orchestrator: {}", e);
+        e
+    })?;
 
     // Enable keyboard handler if requested
     if args.enable_keyboard {
@@ -115,11 +134,10 @@ async fn main() -> Result<()> {
     }
 
     // Initialize all components
-    orchestrator.initialize().await
-        .map_err(|e| {
-            error!("Failed to initialize system: {}", e);
-            e
-        })?;
+    orchestrator.initialize().await.map_err(|e| {
+        error!("Failed to initialize system: {}", e);
+        e
+    })?;
 
     // Handle dry run mode
     if args.dry_run {
@@ -129,11 +147,10 @@ async fn main() -> Result<()> {
     }
 
     // Start all components
-    orchestrator.start().await
-        .map_err(|e| {
-            error!("Failed to start system: {}", e);
-            e
-        })?;
+    orchestrator.start().await.map_err(|e| {
+        error!("Failed to start system: {}", e);
+        e
+    })?;
 
     // Show keyboard controls if enabled
     if args.enable_keyboard {
@@ -144,20 +161,21 @@ async fn main() -> Result<()> {
     }
 
     // Run the main application loop with signal handling
-    let exit_code = orchestrator.run().await
-        .map_err(|e| {
-            error!("System error during execution: {}", e);
-            e
-        })?;
+    let exit_code = orchestrator.run().await.map_err(|e| {
+        error!("System error during execution: {}", e);
+        e
+    })?;
 
     info!("Doorcam system exited with code: {}", exit_code);
-    
+
     // Exit with appropriate code for systemd
     std::process::exit(exit_code);
 }
 
 fn init_logging(args: &Args) -> Result<()> {
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, fmt, Layer};
+    use tracing_subscriber::{
+        fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+    };
 
     // Determine log level based on flags
     let log_level = if args.debug {
@@ -176,33 +194,27 @@ fn init_logging(args: &Args) -> Result<()> {
 
     // Configure format based on options
     let fmt_layer = match args.log_format.as_deref() {
-        Some("json") => {
-            fmt::layer()
-                .json()
-                .with_target(true)
-                .with_thread_ids(true)
-                .with_file(true)
-                .with_line_number(true)
-                .boxed()
-        }
-        Some("compact") => {
-            fmt::layer()
-                .compact()
-                .with_target(false)
-                .with_thread_ids(false)
-                .with_file(false)
-                .with_line_number(false)
-                .boxed()
-        }
-        Some("pretty") | None => {
-            fmt::layer()
-                .pretty()
-                .with_target(true)
-                .with_thread_ids(args.debug)
-                .with_file(args.debug)
-                .with_line_number(args.debug)
-                .boxed()
-        }
+        Some("json") => fmt::layer()
+            .json()
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_file(true)
+            .with_line_number(true)
+            .boxed(),
+        Some("compact") => fmt::layer()
+            .compact()
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false)
+            .with_line_number(false)
+            .boxed(),
+        Some("pretty") | None => fmt::layer()
+            .pretty()
+            .with_target(true)
+            .with_thread_ids(args.debug)
+            .with_file(args.debug)
+            .with_line_number(args.debug)
+            .boxed(),
         Some(format) => {
             eprintln!("Warning: Unknown log format '{}', using default", format);
             fmt::layer()

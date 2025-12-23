@@ -4,18 +4,18 @@ use crate::{
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, ProcessedFrame, Rotation as FrameRotation},
     ring_buffer::RingBuffer,
-    wal::{WalWriter, WalReader, delete_wal, find_wal_files},
+    wal::{delete_wal, find_wal_files, WalReader, WalWriter},
 };
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
-use tokio::sync::{RwLock, Mutex, mpsc};
-use tokio::fs;
-use tracing::{debug, error, info, warn};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::fs;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 
 #[cfg(all(feature = "video_encoding", target_os = "linux"))]
 use gstreamer::prelude::*;
@@ -64,13 +64,16 @@ impl CaptureEventTask {
             is_finalized: AtomicBool::new(false),
         })
     }
-    
+
     async fn extend_postroll(&self, new_motion_time: SystemTime) {
         let mut latest = self.latest_motion_time.lock().await;
         *latest = new_motion_time;
-        info!("Extended capture {} postroll to {:?}", self.event_id, new_motion_time);
+        info!(
+            "Extended capture {} postroll to {:?}",
+            self.event_id, new_motion_time
+        );
     }
-    
+
     fn cancel(&self) {
         self.cancellation_token.cancel();
     }
@@ -84,13 +87,13 @@ impl VideoCapture {
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
         let (video_queue_tx, video_queue_rx) = mpsc::unbounded_channel();
-        
+
         // Spawn video generation worker
         let config_clone = config.clone();
         tokio::spawn(async move {
             Self::video_generation_worker(video_queue_rx, config_clone).await;
         });
-        
+
         Self {
             config,
             event_bus,
@@ -99,45 +102,49 @@ impl VideoCapture {
             video_queue_tx,
         }
     }
-    
+
     /// Background worker that processes video generation jobs
     async fn video_generation_worker(
         mut queue_rx: mpsc::UnboundedReceiver<VideoGenerationJob>,
         config: CaptureConfig,
     ) {
         info!("Video generation worker started");
-        
+
         while let Some(job) = queue_rx.recv().await {
             let event_id = job.event_id.clone();
             let frame_count = job.frame_count;
-            
-            info!("Processing video generation job for capture {} ({} frames)", event_id, frame_count);
-            
+
+            info!(
+                "Processing video generation job for capture {} ({} frames)",
+                event_id, frame_count
+            );
+
             if let Err(e) = Self::generate_video_from_wal(job, &config).await {
                 error!("Failed to generate video for capture {}: {}", event_id, e);
             } else {
                 info!("Video generation completed for capture {}", event_id);
             }
         }
-        
+
         info!("Video generation worker stopped");
     }
 
     /// Start the video capture system
     pub async fn start(&self) -> Result<()> {
         info!("Starting video capture system");
-        
+
         // Create capture directory if it doesn't exist
         let capture_path = PathBuf::from(&self.config.path);
         if !capture_path.exists() {
-            std::fs::create_dir_all(&capture_path)
-                .map_err(|e| CaptureError::DirectoryCreation { 
-                    path: capture_path.display().to_string(), 
-                    source: e 
-                })?;
+            std::fs::create_dir_all(&capture_path).map_err(|e| {
+                CaptureError::DirectoryCreation {
+                    path: capture_path.display().to_string(),
+                    source: e,
+                }
+            })?;
             info!("Created capture directory: {}", capture_path.display());
         }
-        
+
         // Recover any incomplete captures from WAL files
         self.recover_incomplete_captures().await?;
 
@@ -149,16 +156,26 @@ impl VideoCapture {
             loop {
                 match event_receiver.recv().await {
                     Ok(event) => {
-                        if let DoorcamEvent::MotionDetected { contour_area, timestamp } = event {
-                            debug!("Motion detected, starting capture (area: {:.2})", contour_area);
-                            
+                        if let DoorcamEvent::MotionDetected {
+                            contour_area,
+                            timestamp,
+                        } = event
+                        {
+                            debug!(
+                                "Motion detected, starting capture (area: {:.2})",
+                                contour_area
+                            );
+
                             if let Err(e) = capture_system.handle_motion_detected(timestamp).await {
                                 error!("Failed to handle motion detection: {}", e);
                             }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("Capture event listener lagged by {} events; continuing", skipped);
+                        warn!(
+                            "Capture event listener lagged by {} events; continuing",
+                            skipped
+                        );
                         continue;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -176,22 +193,22 @@ impl VideoCapture {
     /// Handle motion detection event by starting a new capture or extending an existing one
     async fn handle_motion_detected(&self, motion_time: SystemTime) -> Result<()> {
         info!("Motion event received at {:?}", motion_time);
-        
+
         // Check if there's an active capture that can be extended
         {
             let captures = self.active_captures.read().await;
-            
+
             info!("Currently {} active capture(s)", captures.len());
-            
+
             let postroll_duration = Duration::from_secs(self.config.postroll_seconds as u64);
-            
+
             // Look for an active capture within the postroll window
             for capture_task in captures.iter() {
                 let latest_motion = *capture_task.latest_motion_time.lock().await;
                 let time_since_motion = motion_time
                     .duration_since(latest_motion)
                     .unwrap_or(Duration::ZERO);
-                
+
                 // If motion detected within the postroll period, extend the capture
                 if time_since_motion < postroll_duration {
                     info!(
@@ -199,20 +216,23 @@ impl VideoCapture {
                         capture_task.event_id,
                         time_since_motion
                     );
-                    
+
                     capture_task.extend_postroll(motion_time).await;
-                    
+
                     return Ok(());
                 }
             }
         }
-        
+
         // No active capture to extend, create a new one
         // Use timestamp as event ID for easy identification
         let timestamp = DateTime::<Utc>::from(motion_time);
         let event_id = timestamp.format("%Y%m%d_%H%M%S_%3f").to_string();
-        
-        info!("No active capture to extend - starting new capture: {}", event_id);
+
+        info!(
+            "No active capture to extend - starting new capture: {}",
+            event_id
+        );
 
         // Create directory for frames only if needed
         // Metadata will be stored in a shared metadata directory
@@ -220,17 +240,25 @@ impl VideoCapture {
 
         // Only create event directory if we need to save images
         if self.config.keep_images {
-            fs::create_dir_all(&capture_dir).await
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
+            fs::create_dir_all(&capture_dir).await.map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("Failed to create capture directory: {}", e),
+                )
+            })?;
 
-            info!("Created capture directory for images: {}", capture_dir.display());
+            info!(
+                "Created capture directory for images: {}",
+                capture_dir.display()
+            );
         } else {
             debug!("Skipping capture directory creation (images disabled)");
         }
 
         // Create capture event task
-        let capture_task = CaptureEventTask::new(event_id.clone(), motion_time, capture_dir.clone());
-        
+        let capture_task =
+            CaptureEventTask::new(event_id.clone(), motion_time, capture_dir.clone());
+
         // Add to active captures
         {
             let mut captures = self.active_captures.write().await;
@@ -243,7 +271,7 @@ impl VideoCapture {
         let event_bus = Arc::clone(&self.event_bus);
         let video_queue_tx = self.video_queue_tx.clone();
         let active_captures = Arc::clone(&self.active_captures);
-        
+
         tokio::spawn(async move {
             if let Err(e) = Self::run_capture_event(
                 capture_task,
@@ -252,7 +280,9 @@ impl VideoCapture {
                 event_bus,
                 video_queue_tx,
                 active_captures,
-            ).await {
+            )
+            .await
+            {
                 error!("Capture event task failed: {}", e);
             }
         });
@@ -271,44 +301,47 @@ impl VideoCapture {
     ) -> Result<()> {
         let event_id = capture_task.event_id.clone();
         info!("Starting capture event task for {}", event_id);
-        
+
         let preroll_duration = Duration::from_secs(config.preroll_seconds as u64);
         let postroll_duration = Duration::from_secs(config.postroll_seconds as u64);
-        
+
         // Create WAL writer for persistent storage
         let wal_dir = PathBuf::from(&config.path).join("wal");
         let mut wal_writer = WalWriter::new(event_id.clone(), &wal_dir).await?;
-        
+
         // Collect and write preroll frames
         let preroll_start = capture_task.initial_motion_time - preroll_duration;
         let preroll_frames = ring_buffer
             .get_frames_in_range(preroll_start, capture_task.initial_motion_time)
             .await;
-        
+
         let preroll_count = preroll_frames.len();
-        info!("Collected {} preroll frames for capture {}", preroll_count, event_id);
-        
+        info!(
+            "Collected {} preroll frames for capture {}",
+            preroll_count, event_id
+        );
+
         // Write preroll frames to WAL
         for frame in preroll_frames {
             capture_task.last_frame_id.store(frame.id, Ordering::SeqCst);
             wal_writer.append_frame(&frame).await?;
         }
-        
+
         info!("Wrote {} preroll frames to WAL", preroll_count);
-        
+
         // Now start the postroll collection phase
         let mut check_interval = tokio::time::interval(Duration::from_millis(100));
         let postroll_start = SystemTime::now();
-        
+
         info!("Starting postroll period for capture {}", event_id);
-        
+
         loop {
             tokio::select! {
                 _ = check_interval.tick() => {
                     // Collect new frames since last check
                     let last_frame_id = capture_task.last_frame_id.load(Ordering::SeqCst);
                     let new_frames = ring_buffer.get_frames_since_id(last_frame_id).await;
-                    
+
                     // Write new frames to WAL
                     if !new_frames.is_empty() {
                         for frame in new_frames {
@@ -316,19 +349,19 @@ impl VideoCapture {
                             wal_writer.append_frame(&frame).await?;
                         }
                     }
-                    
+
                     // Check if we should finalize
                     // Calculate time since last motion
                     let latest_motion = *capture_task.latest_motion_time.lock().await;
                     let time_since_motion = SystemTime::now()
                         .duration_since(latest_motion)
                         .unwrap_or(Duration::ZERO);
-                    
+
                     // Also ensure minimum postroll time has elapsed
                     let time_since_postroll_start = SystemTime::now()
                         .duration_since(postroll_start)
                         .unwrap_or(Duration::ZERO);
-                    
+
                     if time_since_motion >= postroll_duration && time_since_postroll_start >= postroll_duration {
                         info!(
                             "Postroll period completed for capture {} ({}s since last motion)",
@@ -344,22 +377,21 @@ impl VideoCapture {
                 }
             }
         }
-        
+
         // Close WAL and get path
         let frame_count = wal_writer.frame_count();
         let wal_path = wal_writer.close().await?;
-        
+
         // Mark as finalized
         capture_task.is_finalized.store(true, Ordering::SeqCst);
-        
+
         let total_frames = frame_count as usize;
-        
+
         info!(
             "Capture {} finalized with {} total frames (stored in WAL)",
-            event_id,
-            total_frames
+            event_id, total_frames
         );
-        
+
         // Save metadata if enabled (to shared metadata directory)
         if config.save_metadata {
             let metadata = CaptureMetadata {
@@ -371,14 +403,14 @@ impl VideoCapture {
                 total_frame_count: total_frames,
                 config: config.clone(),
             };
-            
+
             if let Err(e) = Self::save_metadata(&metadata, &event_id, &config.path).await {
                 warn!("Failed to save metadata for capture {}: {}", event_id, e);
             }
         } else {
             debug!("Skipping metadata save (disabled in config)");
         }
-        
+
         // Queue video generation from WAL
         if config.video_encoding && total_frames > 0 {
             let job = VideoGenerationJob {
@@ -387,11 +419,17 @@ impl VideoCapture {
                 wal_path,
                 frame_count,
             };
-            
+
             if let Err(e) = video_queue_tx.send(job) {
-                error!("Failed to queue video generation for capture {}: {}", event_id, e);
+                error!(
+                    "Failed to queue video generation for capture {}: {}",
+                    event_id, e
+                );
             } else {
-                info!("Queued video generation for capture {} ({} frames)", event_id, total_frames);
+                info!(
+                    "Queued video generation for capture {} ({} frames)",
+                    event_id, total_frames
+                );
             }
         } else {
             info!("Video encoding disabled or no frames captured");
@@ -400,50 +438,71 @@ impl VideoCapture {
                 warn!("Failed to delete WAL file: {}", e);
             }
         }
-        
+
         // Publish capture completed event
         let saved_files = 1; // Just metadata (video will be created by encoder)
-        
-        if let Err(e) = event_bus.publish(DoorcamEvent::CaptureCompleted {
-            event_id: event_id.clone(),
-            file_count: saved_files,
-        }).await {
+
+        if let Err(e) = event_bus
+            .publish(DoorcamEvent::CaptureCompleted {
+                event_id: event_id.clone(),
+                file_count: saved_files,
+            })
+            .await
+        {
             error!("Failed to publish capture completed event: {}", e);
         }
-        
+
         // Remove from active captures
         {
             let mut captures = active_captures.write().await;
             captures.retain(|c| c.event_id != event_id);
         }
-        
+
         info!("Capture event task {} completed", event_id);
         Ok(())
     }
-    
 
-
-    
     /// Save metadata to disk in shared metadata directory
-    async fn save_metadata(metadata: &CaptureMetadata, event_id: &str, capture_path: &str) -> Result<()> {
-        let metadata_json = serde_json::to_string_pretty(&metadata)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to serialize metadata: {}", e)))?;
+    async fn save_metadata(
+        metadata: &CaptureMetadata,
+        event_id: &str,
+        capture_path: &str,
+    ) -> Result<()> {
+        let metadata_json = serde_json::to_string_pretty(&metadata).map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("Failed to serialize metadata: {}", e),
+            )
+        })?;
 
         // Store metadata in shared metadata directory
         let metadata_dir = PathBuf::from(capture_path).join("metadata");
-        fs::create_dir_all(&metadata_dir).await
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create metadata directory: {}", e)))?;
+        fs::create_dir_all(&metadata_dir).await.map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("Failed to create metadata directory: {}", e),
+            )
+        })?;
 
         let metadata_path = metadata_dir.join(format!("{}.json", event_id));
-        fs::write(&metadata_path, metadata_json).await
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to write metadata file: {}", e)))?;
+        fs::write(&metadata_path, metadata_json)
+            .await
+            .map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("Failed to write metadata file: {}", e),
+                )
+            })?;
 
         debug!("Saved metadata to {}", metadata_path.display());
         Ok(())
     }
 
     /// Generate video from WAL file (called by background worker)
-    async fn generate_video_from_wal(job: VideoGenerationJob, config: &CaptureConfig) -> Result<()> {
+    async fn generate_video_from_wal(
+        job: VideoGenerationJob,
+        config: &CaptureConfig,
+    ) -> Result<()> {
         let video_filename = format!("{}.mp4", job.event_id);
         // Save video in root captures directory, not in event subdirectory
         let video_path = PathBuf::from(&config.path).join(video_filename);
@@ -453,7 +512,7 @@ impl VideoCapture {
         // Read frames from WAL
         let reader = WalReader::new(job.wal_path.clone());
         let frames = reader.read_all_frames().await?;
-        
+
         info!("Read {} frames from WAL for encoding", frames.len());
 
         // Extract individual JPEGs if keep_images is enabled
@@ -469,7 +528,10 @@ impl VideoCapture {
 
         #[cfg(not(all(feature = "video_encoding", target_os = "linux")))]
         {
-            return Err(DoorcamError::component("video_capture", "Video encoding not available on this platform"));
+            return Err(DoorcamError::component(
+                "video_capture",
+                "Video encoding not available on this platform",
+            ));
         }
 
         // Delete WAL file after successful encoding
@@ -477,10 +539,14 @@ impl VideoCapture {
             warn!("Failed to delete WAL file: {}", e);
         }
 
-        info!("Video file created: {} ({} frames encoded)", video_path.display(), frames.len());
+        info!(
+            "Video file created: {} ({} frames encoded)",
+            video_path.display(),
+            frames.len()
+        );
         Ok(())
     }
-    
+
     /// Extract individual JPEG files from frames
     async fn extract_jpegs_from_frames(
         frames: &[FrameData],
@@ -489,34 +555,49 @@ impl VideoCapture {
     ) -> Result<()> {
         // Create frames subdirectory
         let frames_dir = capture_dir.join("frames");
-        fs::create_dir_all(&frames_dir).await
-            .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create frames directory: {}", e)))?;
-        
+        fs::create_dir_all(&frames_dir).await.map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("Failed to create frames directory: {}", e),
+            )
+        })?;
+
         for frame in frames {
             let timestamp = DateTime::<Utc>::from(frame.timestamp);
             let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
             let file_path = frames_dir.join(&filename);
-            
+
             // Get JPEG data (with optional rotation and timestamp overlay)
-            let jpeg_data = Self::prepare_jpeg(frame, config)
-                .await
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e)))?;
-            
+            let jpeg_data = Self::prepare_jpeg(frame, config).await.map_err(|e| {
+                DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e))
+            })?;
+
             // Write to file
-            fs::write(&file_path, &*jpeg_data).await
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to write JPEG file: {}", e)))?;
+            fs::write(&file_path, &*jpeg_data).await.map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("Failed to write JPEG file: {}", e),
+                )
+            })?;
         }
-        
+
         info!("Extracted {} JPEG files", frames.len());
         Ok(())
     }
 
     /// Create video using GStreamer from frames
     #[cfg(all(feature = "video_encoding", target_os = "linux"))]
-    async fn create_video_gstreamer_from_frames(frames: &[FrameData], video_path: &Path, config: &CaptureConfig) -> Result<()> {
+    async fn create_video_gstreamer_from_frames(
+        frames: &[FrameData],
+        video_path: &Path,
+        config: &CaptureConfig,
+    ) -> Result<()> {
         // Initialize GStreamer if not already done
         gstreamer::init().map_err(|e| {
-            DoorcamError::component("video_capture", &format!("Failed to initialize GStreamer: {}", e))
+            DoorcamError::component(
+                "video_capture",
+                &format!("Failed to initialize GStreamer: {}", e),
+            )
         })?;
 
         // Software pipeline (x264):
@@ -536,7 +617,8 @@ impl VideoCapture {
         );
 
         // Software encode (no hardware dependency).
-        Self::encode_frames_with_pipeline("software", &sw_pipeline_desc, frames, video_path, config).await
+        Self::encode_frames_with_pipeline("software", &sw_pipeline_desc, frames, video_path, config)
+            .await
     }
 
     /// Encode frames using a provided GStreamer pipeline description (software path).
@@ -560,29 +642,54 @@ impl VideoCapture {
         debug!("Pipeline ({}): {}", label, pipeline_desc);
 
         let pipeline = gstreamer::parse::launch(pipeline_desc)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to create pipeline: {}", label, e)))?
+            .map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to create pipeline: {}", label, e),
+                )
+            })?
             .downcast::<Pipeline>()
-            .map_err(|_| DoorcamError::component("video_capture", &format!("[{}] Failed to downcast to Pipeline", label)))?;
+            .map_err(|_| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to downcast to Pipeline", label),
+                )
+            })?;
 
         let appsrc = pipeline
             .by_name("src")
-            .ok_or_else(|| DoorcamError::component("video_capture", &format!("[{}] Failed to get appsrc element", label)))?
+            .ok_or_else(|| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to get appsrc element", label),
+                )
+            })?
             .downcast::<AppSrc>()
-            .map_err(|_| DoorcamError::component("video_capture", &format!("[{}] Failed to downcast to AppSrc", label)))?;
+            .map_err(|_| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to downcast to AppSrc", label),
+                )
+            })?;
 
         // Configure appsrc
         appsrc.set_property("format", gstreamer::Format::Time);
         appsrc.set_property("is-live", false);
 
         // Start pipeline
-        pipeline.set_state(gstreamer::State::Playing)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to start pipeline: {}", label, e)))?;
+        pipeline.set_state(gstreamer::State::Playing).map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("[{}] Failed to start pipeline: {}", label, e),
+            )
+        })?;
 
         info!("Started GStreamer encoding pipeline ({})", label);
 
         // Get base time from first frame
         let base_time = if let Some(first_frame) = frames.first() {
-            first_frame.timestamp
+            first_frame
+                .timestamp
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64
@@ -590,28 +697,45 @@ impl VideoCapture {
             0
         };
 
-        info!("[{}] Encoding {} frames to {}", label, frames.len(), video_path.display());
+        info!(
+            "[{}] Encoding {} frames to {}",
+            label,
+            frames.len(),
+            video_path.display()
+        );
 
         // Process frames
         for (frame_index, frame) in frames.iter().enumerate() {
             // Get JPEG data from frame (with optional rotation and overlay)
-            let jpeg_data = Self::prepare_jpeg(frame, config)
-                .await
-                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Frame processing failed: {}", label, e)))?;
+            let jpeg_data = Self::prepare_jpeg(frame, config).await.map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Frame processing failed: {}", label, e),
+                )
+            })?;
 
             // Create GStreamer buffer
-            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len())
-                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to create buffer: {}", label, e)))?;
+            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len()).map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to create buffer: {}", label, e),
+                )
+            })?;
 
             {
                 let buffer_ref = buffer.get_mut().unwrap();
-                let mut map = buffer_ref.map_writable()
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to map buffer: {}", label, e)))?;
+                let mut map = buffer_ref.map_writable().map_err(|e| {
+                    DoorcamError::component(
+                        "video_capture",
+                        &format!("[{}] Failed to map buffer: {}", label, e),
+                    )
+                })?;
                 map.copy_from_slice(&jpeg_data);
             }
 
             // Calculate timestamp relative to first frame
-            let frame_ns = frame.timestamp
+            let frame_ns = frame
+                .timestamp
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64;
@@ -620,7 +744,8 @@ impl VideoCapture {
             // Calculate duration to next frame
             let next_duration = if frame_index + 1 < frames.len() {
                 let next_frame = &frames[frame_index + 1];
-                let next_ns = next_frame.timestamp
+                let next_ns = next_frame
+                    .timestamp
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or(Duration::ZERO)
                     .as_nanos() as u64;
@@ -630,12 +755,22 @@ impl VideoCapture {
             };
 
             // Set timestamp and duration
-            buffer.get_mut().unwrap().set_pts(gstreamer::ClockTime::from_nseconds(relative_ns));
-            buffer.get_mut().unwrap().set_duration(gstreamer::ClockTime::from_nseconds(next_duration));
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_pts(gstreamer::ClockTime::from_nseconds(relative_ns));
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_duration(gstreamer::ClockTime::from_nseconds(next_duration));
 
             // Push buffer
-            appsrc.push_buffer(buffer)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to push buffer: {:?}", label, e)))?;
+            appsrc.push_buffer(buffer).map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to push buffer: {:?}", label, e),
+                )
+            })?;
 
             if frame_index % 30 == 0 && frame_index > 0 {
                 debug!("[{}] Encoded {} frames", label, frame_index);
@@ -643,8 +778,12 @@ impl VideoCapture {
         }
 
         // Signal end of stream
-        appsrc.end_of_stream()
-            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to signal EOS: {:?}", label, e)))?;
+        appsrc.end_of_stream().map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("[{}] Failed to signal EOS: {:?}", label, e),
+            )
+        })?;
 
         // Wait for pipeline to finish
         let bus = pipeline.bus().unwrap();
@@ -655,7 +794,12 @@ impl VideoCapture {
                     break;
                 }
                 gstreamer::MessageView::Error(err) => {
-                    let error_msg = format!("[{}] Video encoding error: {} ({})", label, err.error(), err.debug().unwrap_or_default());
+                    let error_msg = format!(
+                        "[{}] Video encoding error: {} ({})",
+                        label,
+                        err.error(),
+                        err.debug().unwrap_or_default()
+                    );
                     // Stop pipeline before returning
                     let _ = pipeline.set_state(gstreamer::State::Null);
                     return Err(DoorcamError::component("video_capture", &error_msg));
@@ -665,15 +809,27 @@ impl VideoCapture {
         }
 
         // Stop pipeline
-        pipeline.set_state(gstreamer::State::Null)
-            .map_err(|e| DoorcamError::component("video_capture", &format!("[{}] Failed to stop pipeline: {}", label, e)))?;
+        pipeline.set_state(gstreamer::State::Null).map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("[{}] Failed to stop pipeline: {}", label, e),
+            )
+        })?;
 
-        info!("[{}] GStreamer video encoding completed: {} frames", label, frames.len());
+        info!(
+            "[{}] GStreamer video encoding completed: {} frames",
+            label,
+            frames.len()
+        );
         Ok(())
     }
 
     /// Add timestamp overlay to JPEG image (static version for use in static context)
-    async fn add_timestamp_overlay_static(jpeg_data: &[u8], timestamp: SystemTime, config: &CaptureConfig) -> Result<Arc<Vec<u8>>> {
+    async fn add_timestamp_overlay_static(
+        jpeg_data: &[u8],
+        timestamp: SystemTime,
+        config: &CaptureConfig,
+    ) -> Result<Arc<Vec<u8>>> {
         #[cfg(feature = "motion_analysis")]
         {
             use image::{DynamicImage, ImageFormat, Rgba};
@@ -681,32 +837,50 @@ impl VideoCapture {
             use imageproc::drawing::text_size;
             use rusttype::{Font, Scale};
             use std::fs;
-            
+
             // Decode JPEG
             let mut img = image::load_from_memory_with_format(jpeg_data, ImageFormat::Jpeg)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to decode JPEG for overlay: {}", e)))?
+                .map_err(|e| {
+                    DoorcamError::component(
+                        "video_capture",
+                        &format!("Failed to decode JPEG for overlay: {}", e),
+                    )
+                })?
                 .to_rgba8();
-            
+
             // Format timestamp
             let datetime = DateTime::<Utc>::from(timestamp);
             let timestamp_text = datetime.format("%Y-%m-%d %H:%M:%S%.3f UTC").to_string();
-            
+
             // Load font from system path specified in config
-            let font_data = fs::read(&config.timestamp_font_path)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to read font file '{}': {}", config.timestamp_font_path, e)))?;
-            
-            let font = Font::try_from_vec(font_data)
-                .ok_or_else(|| DoorcamError::component("video_capture", &format!("Failed to parse font file '{}'", config.timestamp_font_path)))?;
-            
+            let font_data = fs::read(&config.timestamp_font_path).map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!(
+                        "Failed to read font file '{}': {}",
+                        config.timestamp_font_path, e
+                    ),
+                )
+            })?;
+
+            let font = Font::try_from_vec(font_data).ok_or_else(|| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("Failed to parse font file '{}'", config.timestamp_font_path),
+                )
+            })?;
+
             let scale = Scale::uniform(config.timestamp_font_size);
-            
+
             // Position: bottom-left corner with some padding
             let x: u32 = 10;
-            let y: u32 = img.height().saturating_sub((config.timestamp_font_size * 1.5) as u32);
-            
+            let y: u32 = img
+                .height()
+                .saturating_sub((config.timestamp_font_size * 1.5) as u32);
+
             // Calculate text dimensions for background
             let (text_width, text_height) = text_size(scale, &font, &timestamp_text);
-            
+
             // Draw semi-transparent black background for better readability
             for dy in 0..(text_height as u32 + 10) {
                 for dx in 0..(text_width as u32 + 10) {
@@ -715,16 +889,15 @@ impl VideoCapture {
                     if px < img.width() && py < img.height() {
                         let pixel = img.get_pixel(px, py);
                         // Blend with black background (alpha blending)
-                        img.put_pixel(px, py, Rgba([
-                            pixel[0] / 3,
-                            pixel[1] / 3,
-                            pixel[2] / 3,
-                            255
-                        ]));
+                        img.put_pixel(
+                            px,
+                            py,
+                            Rgba([pixel[0] / 3, pixel[1] / 3, pixel[2] / 3, 255]),
+                        );
                     }
                 }
             }
-            
+
             // Draw white text
             draw_text_mut(
                 &mut img,
@@ -733,19 +906,27 @@ impl VideoCapture {
                 y as i32,
                 scale,
                 &font,
-                &timestamp_text
+                &timestamp_text,
             );
-            
+
             // Encode back to JPEG
             let mut output = Vec::new();
             DynamicImage::ImageRgba8(img)
                 .write_to(&mut std::io::Cursor::new(&mut output), ImageFormat::Jpeg)
-                .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to encode JPEG with overlay: {}", e)))?;
-            
-            debug!("Added timestamp overlay: {} (font: {}, size: {})", timestamp_text, config.timestamp_font_path, config.timestamp_font_size);
+                .map_err(|e| {
+                    DoorcamError::component(
+                        "video_capture",
+                        &format!("Failed to encode JPEG with overlay: {}", e),
+                    )
+                })?;
+
+            debug!(
+                "Added timestamp overlay: {} (font: {}, size: {})",
+                timestamp_text, config.timestamp_font_path, config.timestamp_font_size
+            );
             Ok(Arc::new(output))
         }
-        
+
         #[cfg(not(feature = "motion_analysis"))]
         {
             debug!("Timestamp overlay requested but motion_analysis feature not enabled");
@@ -754,12 +935,10 @@ impl VideoCapture {
         }
     }
 
-
-
     /// Get statistics about active captures
     pub async fn get_capture_stats(&self) -> CaptureStats {
         let captures = self.active_captures.read().await;
-        
+
         CaptureStats {
             active_captures: captures.len(),
             total_active_frames: 0, // Frames are now in memory, not tracked individually
@@ -769,20 +948,20 @@ impl VideoCapture {
     /// Recover incomplete captures from WAL files (called on startup)
     async fn recover_incomplete_captures(&self) -> Result<()> {
         let wal_dir = PathBuf::from(&self.config.path).join("wal");
-        
+
         if !wal_dir.exists() {
             return Ok(());
         }
-        
+
         let wal_files = find_wal_files(&wal_dir).await?;
-        
+
         if wal_files.is_empty() {
             info!("No incomplete captures to recover");
             return Ok(());
         }
-        
+
         info!("Found {} incomplete capture(s) to recover", wal_files.len());
-        
+
         for wal_path in wal_files {
             // Extract event ID from filename (timestamp format: YYYYMMDD_HHMMSS_mmm)
             let event_id = wal_path
@@ -790,23 +969,30 @@ impl VideoCapture {
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            
+
             info!("Recovering capture: {} (from WAL)", event_id);
-            
+
             // Read frame count from WAL
             let reader = WalReader::new(wal_path.clone());
             let frames = reader.read_all_frames().await?;
             let frame_count = frames.len() as u32;
-            
+
             // Capture directory should already exist (created when capture started)
             // But create it if missing (in case it was deleted) and if we need it for images
             let capture_dir = PathBuf::from(&self.config.path).join(&event_id);
             if !capture_dir.exists() && self.config.keep_images {
-                fs::create_dir_all(&capture_dir).await
-                    .map_err(|e| DoorcamError::component("video_capture", &format!("Failed to create capture directory: {}", e)))?;
-                info!("Created missing capture directory for recovered event: {}", event_id);
+                fs::create_dir_all(&capture_dir).await.map_err(|e| {
+                    DoorcamError::component(
+                        "video_capture",
+                        &format!("Failed to create capture directory: {}", e),
+                    )
+                })?;
+                info!(
+                    "Created missing capture directory for recovered event: {}",
+                    event_id
+                );
             }
-            
+
             // Queue for encoding
             let job = VideoGenerationJob {
                 event_id: event_id.clone(),
@@ -814,21 +1000,24 @@ impl VideoCapture {
                 wal_path,
                 frame_count,
             };
-            
+
             if let Err(e) = self.video_queue_tx.send(job) {
                 error!("Failed to queue recovered capture for encoding: {}", e);
             } else {
-                info!("Queued recovered capture {} for encoding ({} frames)", event_id, frame_count);
+                info!(
+                    "Queued recovered capture {} for encoding ({} frames)",
+                    event_id, frame_count
+                );
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Stop the video capture system
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping video capture system");
-        
+
         // Cancel all active capture tasks
         let active_captures = {
             let captures = self.active_captures.read().await;
@@ -839,7 +1028,7 @@ impl VideoCapture {
             warn!("Cancelling capture on shutdown: {}", capture.event_id);
             capture.cancel();
         }
-        
+
         // Wait a bit for tasks to finish
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -911,13 +1100,12 @@ pub struct CaptureMetadata {
 mod tests {
     use super::*;
     use crate::{
-        config::{CaptureConfig},
+        config::CaptureConfig,
         events::EventBus,
         frame::{FrameData, FrameFormat},
         ring_buffer::RingBuffer,
     };
     use std::time::Duration;
-
 
     fn create_test_config() -> CaptureConfig {
         CaptureConfig {
@@ -935,14 +1123,7 @@ mod tests {
     }
 
     fn create_test_frame(id: u64, timestamp: SystemTime) -> FrameData {
-        FrameData::new(
-            id,
-            timestamp,
-            vec![0u8; 1024],
-            640,
-            480,
-            FrameFormat::Mjpeg,
-        )
+        FrameData::new(id, timestamp, vec![0u8; 1024], 640, 480, FrameFormat::Mjpeg)
     }
 
     #[tokio::test]
@@ -952,7 +1133,7 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let capture = VideoCapture::new(config, event_bus, ring_buffer);
-        
+
         let stats = capture.get_capture_stats().await;
         assert_eq!(stats.active_captures, 0);
     }
@@ -974,7 +1155,7 @@ mod tests {
         }
 
         let capture = VideoCapture::new(config, Arc::clone(&event_bus), ring_buffer);
-        
+
         // Simulate motion detection
         let motion_time = SystemTime::now();
         capture.handle_motion_detected(motion_time).await.unwrap();
@@ -990,7 +1171,7 @@ mod tests {
         config.postroll_seconds = 1; // Short postroll for testing
         config.save_metadata = false; // Disable to avoid filesystem issues in tests
         config.keep_images = false; // Disable to avoid filesystem issues in tests
-        
+
         let event_bus = Arc::new(EventBus::new(10));
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
@@ -1005,7 +1186,7 @@ mod tests {
         }
 
         let capture = VideoCapture::new(config, Arc::clone(&event_bus), ring_buffer);
-        
+
         // Start capture
         let motion_time = now + Duration::from_millis(500);
         capture.handle_motion_detected(motion_time).await.unwrap();

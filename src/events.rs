@@ -8,42 +8,30 @@ use tracing::{debug, error, info, warn};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DoorcamEvent {
     /// Motion was detected in the camera feed
-    MotionDetected { 
-        contour_area: f64, 
-        timestamp: SystemTime 
+    MotionDetected {
+        contour_area: f64,
+        timestamp: SystemTime,
     },
     /// A new frame is ready in the ring buffer
-    FrameReady { 
-        frame_id: u64, 
-        timestamp: SystemTime 
+    FrameReady {
+        frame_id: u64,
+        timestamp: SystemTime,
     },
     /// Touch input was detected on the display
-    TouchDetected { 
-        timestamp: SystemTime 
-    },
+    TouchDetected { timestamp: SystemTime },
     /// Video capture has started for a motion event
-    CaptureStarted { 
-        event_id: String 
-    },
+    CaptureStarted { event_id: String },
     /// Video capture has completed
-    CaptureCompleted { 
-        event_id: String, 
-        file_count: u32 
-    },
+    CaptureCompleted { event_id: String, file_count: u32 },
     /// A system error occurred in a component
-    SystemError { 
-        component: String, 
-        error: String 
-    },
+    SystemError { component: String, error: String },
     /// Display activation requested
     DisplayActivate {
         timestamp: SystemTime,
         duration_seconds: u32,
     },
     /// Display deactivation requested
-    DisplayDeactivate {
-        timestamp: SystemTime,
-    },
+    DisplayDeactivate { timestamp: SystemTime },
     /// Camera connection status changed
     CameraStatusChanged {
         connected: bool,
@@ -86,18 +74,30 @@ impl DoorcamEvent {
             DoorcamEvent::CaptureStarted { event_id } => {
                 format!("Capture started: {}", event_id)
             }
-            DoorcamEvent::CaptureCompleted { event_id, file_count } => {
+            DoorcamEvent::CaptureCompleted {
+                event_id,
+                file_count,
+            } => {
                 format!("Capture completed: {} ({} files)", event_id, file_count)
             }
             DoorcamEvent::SystemError { component, error } => {
                 format!("Error in {}: {}", component, error)
             }
-            DoorcamEvent::DisplayActivate { duration_seconds, .. } => {
+            DoorcamEvent::DisplayActivate {
+                duration_seconds, ..
+            } => {
                 format!("Display activated for {} seconds", duration_seconds)
             }
             DoorcamEvent::DisplayDeactivate { .. } => "Display deactivated".to_string(),
             DoorcamEvent::CameraStatusChanged { connected, .. } => {
-                format!("Camera {}", if *connected { "connected" } else { "disconnected" })
+                format!(
+                    "Camera {}",
+                    if *connected {
+                        "connected"
+                    } else {
+                        "disconnected"
+                    }
+                )
             }
             DoorcamEvent::ShutdownRequested { reason, .. } => {
                 format!("Shutdown requested: {}", reason)
@@ -132,7 +132,7 @@ impl EventBus {
     /// Create a new event bus with the specified channel capacity
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { 
+        Self {
             sender,
             debug_logging: false,
         }
@@ -141,7 +141,7 @@ impl EventBus {
     /// Create a new event bus with debug logging enabled
     pub fn with_debug_logging(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { 
+        Self {
             sender,
             debug_logging: true,
         }
@@ -183,9 +183,10 @@ impl EventBus {
             }
         }
 
-        self.sender.send(event)
-            .map_err(|e| EventBusError::PublishFailed { 
-                details: e.to_string() 
+        self.sender
+            .send(event)
+            .map_err(|e| EventBusError::PublishFailed {
+                details: e.to_string(),
             })
     }
 
@@ -208,8 +209,6 @@ impl Clone for EventBus {
         }
     }
 }
-
-
 
 /// Event filter for selective event handling
 #[derive(Debug, Clone)]
@@ -251,7 +250,11 @@ pub struct EventReceiver {
 
 impl EventReceiver {
     /// Create a new event receiver with a filter
-    pub fn new(receiver: broadcast::Receiver<DoorcamEvent>, filter: EventFilter, name: String) -> Self {
+    pub fn new(
+        receiver: broadcast::Receiver<DoorcamEvent>,
+        filter: EventFilter,
+        name: String,
+    ) -> Self {
         Self {
             receiver,
             filter,
@@ -265,15 +268,19 @@ impl EventReceiver {
             match self.receiver.recv().await {
                 Ok(event) => {
                     if self.filter.matches(&event) {
-                        debug!("Receiver '{}' received event: {}", self.name, event.description());
+                        debug!(
+                            "Receiver '{}' received event: {}",
+                            self.name,
+                            event.description()
+                        );
                         return Ok(event);
                     }
                     // Continue loop to get next event if this one doesn't match filter
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!("Receiver '{}' lagged behind by {} events", self.name, n);
-                    return Err(EventBusError::PublishFailed { 
-                        details: format!("Receiver lagged behind by {} events", n) 
+                    return Err(EventBusError::PublishFailed {
+                        details: format!("Receiver lagged behind by {} events", n),
                     });
                 }
                 Err(broadcast::error::RecvError::Closed) => {
@@ -290,7 +297,11 @@ impl EventReceiver {
             match self.receiver.try_recv() {
                 Ok(event) => {
                     if self.filter.matches(&event) {
-                        debug!("Receiver '{}' received event: {}", self.name, event.description());
+                        debug!(
+                            "Receiver '{}' received event: {}",
+                            self.name,
+                            event.description()
+                        );
                         return Ok(Some(event));
                     }
                     // Continue loop to check next event
@@ -300,8 +311,8 @@ impl EventReceiver {
                 }
                 Err(broadcast::error::TryRecvError::Lagged(n)) => {
                     warn!("Receiver '{}' lagged behind by {} events", self.name, n);
-                    return Err(EventBusError::PublishFailed { 
-                        details: format!("Receiver lagged behind by {} events", n) 
+                    return Err(EventBusError::PublishFailed {
+                        details: format!("Receiver lagged behind by {} events", n),
                     });
                 }
                 Err(broadcast::error::TryRecvError::Closed) => {
@@ -357,19 +368,25 @@ mod tests {
         event_bus.publish(event).await.unwrap();
 
         // Both receivers should get the event
-        let _ = timeout(Duration::from_millis(100), receiver1.recv()).await.unwrap().unwrap();
-        let _ = timeout(Duration::from_millis(100), receiver2.recv()).await.unwrap().unwrap();
+        let _ = timeout(Duration::from_millis(100), receiver1.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = timeout(Duration::from_millis(100), receiver2.recv())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
     async fn test_event_filter() {
         let filter = EventFilter::EventTypes(vec!["motion_detected", "touch_detected"]);
-        
+
         let motion_event = DoorcamEvent::MotionDetected {
             contour_area: 1000.0,
             timestamp: SystemTime::now(),
         };
-        
+
         let frame_event = DoorcamEvent::FrameReady {
             frame_id: 1,
             timestamp: SystemTime::now(),
@@ -387,18 +404,27 @@ mod tests {
         let mut filtered_receiver = EventReceiver::new(receiver, filter, "test".to_string());
 
         // Publish events of different types
-        event_bus.publish(DoorcamEvent::FrameReady {
-            frame_id: 1,
-            timestamp: SystemTime::now(),
-        }).await.unwrap();
+        event_bus
+            .publish(DoorcamEvent::FrameReady {
+                frame_id: 1,
+                timestamp: SystemTime::now(),
+            })
+            .await
+            .unwrap();
 
-        event_bus.publish(DoorcamEvent::MotionDetected {
-            contour_area: 2000.0,
-            timestamp: SystemTime::now(),
-        }).await.unwrap();
+        event_bus
+            .publish(DoorcamEvent::MotionDetected {
+                contour_area: 2000.0,
+                timestamp: SystemTime::now(),
+            })
+            .await
+            .unwrap();
 
         // Should only receive the motion event
-        let received = timeout(Duration::from_millis(100), filtered_receiver.recv()).await.unwrap().unwrap();
+        let received = timeout(Duration::from_millis(100), filtered_receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
         match received {
             DoorcamEvent::MotionDetected { contour_area, .. } => {
                 assert_eq!(contour_area, 2000.0);
@@ -440,24 +466,16 @@ impl Default for EventRouter {
 impl EventRouter {
     /// Create a new event router
     pub fn new() -> Self {
-        Self {
-            routes: Vec::new(),
-        }
+        Self { routes: Vec::new() }
     }
 
     /// Add a route for handling specific events
-    pub fn add_route<F, Fut>(
-        &mut self, 
-        filter: EventFilter, 
-        handler_name: String, 
-        handler: F
-    ) where
+    pub fn add_route<F, Fut>(&mut self, filter: EventFilter, handler_name: String, handler: F)
+    where
         F: Fn(DoorcamEvent) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        let boxed_handler = Box::new(move |event: DoorcamEvent| {
-            tokio::spawn(handler(event))
-        });
+        let boxed_handler = Box::new(move |event: DoorcamEvent| tokio::spawn(handler(event)));
 
         self.routes.push(EventRoute {
             filter,
@@ -469,7 +487,7 @@ impl EventRouter {
     /// Route an event to all matching handlers
     pub fn route_event(&self, event: DoorcamEvent) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
-        
+
         for route in &self.routes {
             if route.filter.matches(&event) {
                 debug!("Routing event to handler: {}", route.handler_name);
@@ -477,7 +495,7 @@ impl EventRouter {
                 handles.push(handle);
             }
         }
-        
+
         handles
     }
 
@@ -492,10 +510,10 @@ impl EventRouter {
 pub trait EventHandler: Send + Sync {
     /// Handle an incoming event
     async fn handle_event(&mut self, event: DoorcamEvent) -> Result<(), EventBusError>;
-    
+
     /// Get the name of this handler for logging
     fn handler_name(&self) -> &str;
-    
+
     /// Get the event filter for this handler
     fn event_filter(&self) -> EventFilter;
 }
@@ -511,7 +529,7 @@ pub struct EventPipeline {
 pub trait EventProcessor: Send + Sync {
     /// Process an event and optionally transform it
     async fn process(&self, event: DoorcamEvent) -> Result<Option<DoorcamEvent>, EventBusError>;
-    
+
     /// Get the name of this processor
     fn processor_name(&self) -> &str;
 }
@@ -531,9 +549,12 @@ impl EventPipeline {
     }
 
     /// Process an event through all stages
-    pub async fn process_event(&self, mut event: DoorcamEvent) -> Result<Option<DoorcamEvent>, EventBusError> {
+    pub async fn process_event(
+        &self,
+        mut event: DoorcamEvent,
+    ) -> Result<Option<DoorcamEvent>, EventBusError> {
         debug!("Processing event through pipeline: {}", self.name);
-        
+
         for (i, stage) in self.stages.iter().enumerate() {
             match stage.process(event).await? {
                 Some(processed_event) => {
@@ -541,12 +562,16 @@ impl EventPipeline {
                     event = processed_event;
                 }
                 None => {
-                    debug!("Stage {} ({}) filtered out event", i, stage.processor_name());
+                    debug!(
+                        "Stage {} ({}) filtered out event",
+                        i,
+                        stage.processor_name()
+                    );
                     return Ok(None);
                 }
             }
         }
-        
+
         Ok(Some(event))
     }
 }
@@ -614,13 +639,13 @@ impl EventDebugger {
     /// Record an event for debugging
     pub fn record_event(&mut self, event: DoorcamEvent) {
         let timestamp = SystemTime::now();
-        
+
         // Update metrics
         self.metrics.record_event(&event);
-        
+
         // Add to history
         self.event_history.push_back((timestamp, event));
-        
+
         // Maintain max history size
         while self.event_history.len() > self.max_history {
             self.event_history.pop_front();
@@ -641,7 +666,7 @@ impl EventDebugger {
     /// Get all events in the last duration
     pub fn get_events_since(&self, duration: std::time::Duration) -> Vec<&DoorcamEvent> {
         let cutoff = SystemTime::now() - duration;
-        
+
         self.event_history
             .iter()
             .filter(|(timestamp, _)| *timestamp >= cutoff)
@@ -660,7 +685,7 @@ impl EventDebugger {
         info!("  Total events: {}", self.metrics.total_events);
         info!("  Errors: {}", self.metrics.errors);
         info!("  History size: {}", self.event_history.len());
-        
+
         for (event_type, count) in &self.metrics.events_by_type {
             info!("  {}: {}", event_type, count);
         }
@@ -680,9 +705,9 @@ pub mod patterns {
 
     /// Create an event handler that filters and forwards events to another bus
     pub fn create_forwarding_handler(
-        target_bus: Arc<EventBus>, 
+        target_bus: Arc<EventBus>,
         filter: EventFilter,
-        name: String
+        name: String,
     ) -> impl EventHandler {
         ForwardingHandler {
             target_bus,
@@ -694,12 +719,9 @@ pub mod patterns {
     /// Create an event handler that collects metrics
     pub fn create_metrics_handler(
         metrics: Arc<Mutex<EventMetrics>>,
-        name: String
+        name: String,
     ) -> impl EventHandler {
-        MetricsHandler {
-            metrics,
-            name,
-        }
+        MetricsHandler { metrics, name }
     }
 
     struct LoggingHandler {
@@ -771,8 +793,8 @@ pub mod patterns {
 
 #[cfg(test)]
 mod pattern_tests {
-    use super::*;
     use super::patterns::*;
+    use super::*;
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use tokio::time::{timeout, Duration};
@@ -781,7 +803,7 @@ mod pattern_tests {
     async fn test_event_router() {
         let mut router = EventRouter::new();
         let received_events = Arc::new(Mutex::new(Vec::new()));
-        
+
         let events_clone = Arc::clone(&received_events);
         router.add_route(
             EventFilter::EventTypes(vec!["motion_detected"]),
@@ -791,7 +813,7 @@ mod pattern_tests {
                 async move {
                     events.lock().await.push(event);
                 }
-            }
+            },
         );
 
         let motion_event = DoorcamEvent::MotionDetected {
@@ -820,7 +842,7 @@ mod pattern_tests {
         let events = received_events.lock().await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            DoorcamEvent::MotionDetected { .. } => {},
+            DoorcamEvent::MotionDetected { .. } => {}
             _ => panic!("Expected motion event"),
         }
     }
@@ -850,7 +872,7 @@ mod pattern_tests {
         let mut handler = create_forwarding_handler(
             Arc::clone(&target_bus),
             EventFilter::EventTypes(vec!["motion_detected"]),
-            "forwarder".to_string()
+            "forwarder".to_string(),
         );
 
         let motion_event = DoorcamEvent::MotionDetected {
@@ -867,14 +889,19 @@ mod pattern_tests {
         handler.handle_event(touch_event).await.unwrap();
 
         // Should only receive the motion event on target bus
-        let received = timeout(Duration::from_millis(100), target_receiver.recv()).await.unwrap().unwrap();
+        let received = timeout(Duration::from_millis(100), target_receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
         match received {
-            DoorcamEvent::MotionDetected { .. } => {},
+            DoorcamEvent::MotionDetected { .. } => {}
             _ => panic!("Expected motion event"),
         }
 
         // Should not receive touch event
-        assert!(timeout(Duration::from_millis(50), target_receiver.recv()).await.is_err());
+        assert!(timeout(Duration::from_millis(50), target_receiver.recv())
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -882,9 +909,17 @@ mod pattern_tests {
         let mut debugger = EventDebugger::new(5);
 
         let events = vec![
-            DoorcamEvent::MotionDetected { contour_area: 1000.0, timestamp: SystemTime::now() },
-            DoorcamEvent::TouchDetected { timestamp: SystemTime::now() },
-            DoorcamEvent::FrameReady { frame_id: 1, timestamp: SystemTime::now() },
+            DoorcamEvent::MotionDetected {
+                contour_area: 1000.0,
+                timestamp: SystemTime::now(),
+            },
+            DoorcamEvent::TouchDetected {
+                timestamp: SystemTime::now(),
+            },
+            DoorcamEvent::FrameReady {
+                frame_id: 1,
+                timestamp: SystemTime::now(),
+            },
         ];
 
         for event in events {
@@ -900,10 +935,10 @@ mod pattern_tests {
     async fn test_event_system_stress() {
         use std::sync::Arc;
         use tokio::time::Duration;
-        
+
         let event_bus = Arc::new(EventBus::new(1000));
         let mut handles = Vec::new();
-        
+
         // Spawn multiple publishers
         for publisher_id in 0..5 {
             let event_bus_clone = Arc::clone(&event_bus);
@@ -914,14 +949,14 @@ mod pattern_tests {
                         timestamp: SystemTime::now(),
                     };
                     let _ = event_bus_clone.publish(event).await;
-                    
+
                     // Small delay to simulate realistic event rates
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
             });
             handles.push(handle);
         }
-        
+
         // Spawn multiple subscribers
         let received_events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
         for _ in 0..3 {
@@ -930,12 +965,11 @@ mod pattern_tests {
             let handle = tokio::spawn(async move {
                 let mut receiver = event_bus_clone.subscribe();
                 let mut count = 0;
-                
+
                 while count < 50 {
-                    if let Ok(event) = tokio::time::timeout(
-                        Duration::from_millis(100),
-                        receiver.recv()
-                    ).await {
+                    if let Ok(event) =
+                        tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await
+                    {
                         if event.is_ok() {
                             received_clone.lock().await.push(event.unwrap());
                             count += 1;
@@ -947,12 +981,12 @@ mod pattern_tests {
             });
             handles.push(handle);
         }
-        
+
         // Wait for all tasks to complete
         for handle in handles {
             let _ = handle.await;
         }
-        
+
         // Check that events were received
         let received = received_events.lock().await;
         assert!(!received.is_empty());
@@ -961,39 +995,39 @@ mod pattern_tests {
     #[tokio::test]
     async fn test_event_error_handling() {
         let event_bus = EventBus::new(10); // Small buffer to test overflow
-        
+
         // Create a subscriber first so events can be published
         let _receiver = event_bus.subscribe();
-        
+
         // Test that the event bus handles publishing gracefully
         let mut successful_publishes = 0;
-        
+
         for i in 0..15 {
             let event = DoorcamEvent::SystemError {
                 component: format!("component_{}", i),
                 error: "Test error".to_string(),
             };
-            
+
             let result = event_bus.publish(event).await;
             if result.is_ok() {
                 successful_publishes += 1;
             }
         }
-        
+
         // Should have some successful publishes
         assert!(successful_publishes > 0);
-        
+
         // Test that the event bus remains functional
         assert!(event_bus.has_subscribers());
-        
+
         // Test that we can publish additional events
         let test_event = DoorcamEvent::SystemError {
             component: "test".to_string(),
             error: "Final test".to_string(),
         };
-        
+
         // This should work since we have a subscriber
         let _result = event_bus.publish(test_event).await;
         // Result may vary depending on buffer state, but the operation should complete
     }
-}    
+}

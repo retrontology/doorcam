@@ -1,8 +1,8 @@
 use crate::analyzer::MotionAnalyzer;
 use crate::config::AnalyzerConfig;
-use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
-use crate::ring_buffer::RingBuffer;
 use crate::error::{DoorcamError, Result};
+use crate::events::{DoorcamEvent, EventBus, EventFilter, EventReceiver};
+use crate::ring_buffer::RingBuffer;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,9 +29,9 @@ impl MotionAnalyzerIntegration {
         event_bus: Arc<EventBus>,
     ) -> Result<Self> {
         info!("Creating motion analyzer integration");
-        
+
         let analyzer = MotionAnalyzer::new(config).await?;
-        
+
         Ok(Self {
             analyzer: Arc::new(RwLock::new(analyzer)),
             ring_buffer,
@@ -42,7 +42,7 @@ impl MotionAnalyzerIntegration {
             last_analysis_time: Arc::new(tokio::sync::RwLock::new(std::time::Instant::now())),
         })
     }
-    
+
     /// Start the motion analysis integration
     pub async fn start(&mut self) -> Result<()> {
         let mut is_running = self.is_running.write().await;
@@ -50,21 +50,21 @@ impl MotionAnalyzerIntegration {
             warn!("Motion analyzer integration is already running");
             return Ok(());
         }
-        
+
         info!("Starting motion analyzer integration");
-        
+
         // Start the motion analysis task
         let analyzer = Arc::clone(&self.analyzer);
         let ring_buffer = Arc::clone(&self.ring_buffer);
         let event_bus = Arc::clone(&self.event_bus);
         let is_running_clone = Arc::clone(&self.is_running);
         let last_analysis_time = Arc::clone(&self.last_analysis_time);
-        
+
         let analysis_task = tokio::spawn(async move {
             info!("Motion analysis task started");
-            
+
             let mut last_frame_id = 0u64;
-            
+
             loop {
                 // Check if we should continue running
                 {
@@ -74,46 +74,47 @@ impl MotionAnalyzerIntegration {
                         break;
                     }
                 }
-                
+
                 // Get current configuration
                 let config = {
                     let analyzer_guard = analyzer.read().await;
                     analyzer_guard.config().clone()
                 };
-                
+
                 // Calculate frame interval based on fps
                 let frame_interval = Duration::from_millis(1000 / config.fps as u64);
-                
+
                 // Check if enough time has passed since last analysis
                 let should_analyze = {
                     let last_time = last_analysis_time.read().await;
                     last_time.elapsed() >= frame_interval
                 };
-                
+
                 if should_analyze {
                     // Get the latest frame from the ring buffer
                     if let Some(frame) = ring_buffer.get_latest_frame().await {
                         // Skip if we've already analyzed this frame
                         if frame.id > last_frame_id {
                             last_frame_id = frame.id;
-                            
+
                             // Update last analysis time
                             {
                                 let mut last_time = last_analysis_time.write().await;
                                 *last_time = std::time::Instant::now();
                             }
-                            
+
                             debug!("Analyzing frame {} (fps limit: {})", frame.id, config.fps);
-                            
+
                             // Analyze the frame with timeout to prevent blocking shutdown
                             let analysis_result = tokio::time::timeout(
                                 tokio::time::Duration::from_millis(2000), // Increased timeout for hardware decoding
                                 async {
                                     let mut analyzer_guard = analyzer.write().await;
                                     analyzer_guard.analyze_frame(&frame, &event_bus).await
-                                }
-                            ).await;
-                            
+                                },
+                            )
+                            .await;
+
                             match analysis_result {
                                 Ok(Ok(Some(motion_area))) => {
                                     info!("Motion detected with area: {:.2}", motion_area);
@@ -123,13 +124,19 @@ impl MotionAnalyzerIntegration {
                                 }
                                 Ok(Err(e)) => {
                                     error!("Motion analysis error: {}", e);
-                                    
+
                                     // Publish system error event
-                                    if let Err(publish_err) = event_bus.publish(DoorcamEvent::SystemError {
-                                        component: "motion_analyzer_integration".to_string(),
-                                        error: e.to_string(),
-                                    }).await {
-                                        error!("Failed to publish motion analysis error event: {}", publish_err);
+                                    if let Err(publish_err) = event_bus
+                                        .publish(DoorcamEvent::SystemError {
+                                            component: "motion_analyzer_integration".to_string(),
+                                            error: e.to_string(),
+                                        })
+                                        .await
+                                    {
+                                        error!(
+                                            "Failed to publish motion analysis error event: {}",
+                                            publish_err
+                                        );
                                     }
                                 }
                                 Err(_) => {
@@ -143,7 +150,7 @@ impl MotionAnalyzerIntegration {
                         debug!("No frames available for motion analysis");
                     }
                 }
-                
+
                 // Sleep for a short time to prevent busy waiting
                 // Use a shorter sleep when analysis is needed, longer when waiting for next interval
                 let sleep_duration = if should_analyze {
@@ -156,27 +163,27 @@ impl MotionAnalyzerIntegration {
                     };
                     std::cmp::min(remaining_time / 4, Duration::from_millis(100))
                 };
-                
+
                 tokio::time::sleep(sleep_duration).await;
             }
-            
+
             info!("Motion analysis task completed");
         });
-        
+
         // Start the event handler task for system events
         let event_receiver = self.event_bus.subscribe();
         let _analyzer_for_events = Arc::clone(&self.analyzer);
         let is_running_for_events = Arc::clone(&self.is_running);
-        
+
         let event_handler_task = tokio::spawn(async move {
             let mut receiver = EventReceiver::new(
                 event_receiver,
                 EventFilter::EventTypes(vec!["system_error", "shutdown_requested"]),
-                "motion_analyzer_integration".to_string()
+                "motion_analyzer_integration".to_string(),
             );
-            
+
             info!("Motion analyzer event handler started");
-            
+
             loop {
                 // Check if we should continue running
                 {
@@ -186,12 +193,11 @@ impl MotionAnalyzerIntegration {
                         break;
                     }
                 }
-                
+
                 // Use timeout for event receiving to allow for faster shutdown
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_millis(100),
-                    receiver.recv()
-                ).await {
+                match tokio::time::timeout(tokio::time::Duration::from_millis(100), receiver.recv())
+                    .await
+                {
                     Ok(Ok(event)) => {
                         match event {
                             DoorcamEvent::SystemError { component, error } => {
@@ -220,28 +226,28 @@ impl MotionAnalyzerIntegration {
                     }
                 }
             }
-            
+
             info!("Motion analyzer event handler completed");
         });
-        
+
         self.analysis_task = Some(analysis_task);
         self.event_handler_task = Some(event_handler_task);
         *is_running = true;
-        
+
         info!("Motion analyzer integration started successfully");
         Ok(())
     }
-    
+
     /// Stop the motion analysis integration
     pub async fn stop(&mut self) -> Result<()> {
         info!("Stopping motion analyzer integration");
-        
+
         // Set running flag to false
         {
             let mut is_running = self.is_running.write().await;
             *is_running = false;
         }
-        
+
         // Wait for tasks to complete with timeout
         if let Some(analysis_task) = self.analysis_task.take() {
             match tokio::time::timeout(Duration::from_secs(3), analysis_task).await {
@@ -256,7 +262,7 @@ impl MotionAnalyzerIntegration {
                 }
             }
         }
-        
+
         if let Some(event_handler_task) = self.event_handler_task.take() {
             match tokio::time::timeout(Duration::from_secs(1), event_handler_task).await {
                 Ok(Ok(())) => {
@@ -276,42 +282,42 @@ impl MotionAnalyzerIntegration {
             let mut analyzer = self.analyzer.write().await;
             analyzer.cleanup();
         }
-        
+
         info!("Motion analyzer integration stopped");
         Ok(())
     }
-    
+
     /// Check if the integration is currently running
     pub async fn is_running(&self) -> bool {
         *self.is_running.read().await
     }
-    
+
     /// Update the analyzer configuration
     pub async fn update_config(&self, config: AnalyzerConfig) -> Result<()> {
         info!("Updating motion analyzer configuration");
-        
+
         let mut analyzer = self.analyzer.write().await;
         analyzer.update_config(config);
-        
+
         info!("Motion analyzer configuration updated");
         Ok(())
     }
-    
+
     /// Get current analyzer configuration
     pub async fn get_config(&self) -> AnalyzerConfig {
         let analyzer = self.analyzer.read().await;
         analyzer.config().clone()
     }
-    
+
     /// Get motion analysis metrics
     pub async fn get_metrics(&self) -> MotionAnalysisMetrics {
         // For now, return basic metrics
         // In a full implementation, we'd track more detailed statistics
         MotionAnalysisMetrics {
             is_running: self.is_running().await,
-            frames_analyzed: 0, // TODO: Track this in the analyzer
+            frames_analyzed: 0,        // TODO: Track this in the analyzer
             motion_events_detected: 0, // TODO: Track this in the analyzer
-            last_motion_time: None, // TODO: Track this in the analyzer
+            last_motion_time: None,    // TODO: Track this in the analyzer
         }
     }
 }
@@ -341,48 +347,42 @@ impl MotionAnalyzerIntegrationBuilder {
             event_bus: None,
         }
     }
-    
+
     /// Set the analyzer configuration
     pub fn with_config(mut self, config: AnalyzerConfig) -> Self {
         self.config = Some(config);
         self
     }
-    
+
     /// Set the ring buffer
     pub fn with_ring_buffer(mut self, ring_buffer: Arc<RingBuffer>) -> Self {
         self.ring_buffer = Some(ring_buffer);
         self
     }
-    
+
     /// Set the event bus
     pub fn with_event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
         self.event_bus = Some(event_bus);
         self
     }
-    
+
     /// Build the motion analyzer integration
     pub async fn build(self) -> Result<MotionAnalyzerIntegration> {
-        let config = self.config.ok_or_else(|| {
-            DoorcamError::Component {
-                component: "motion_analyzer_integration_builder".to_string(),
-                message: "Analyzer configuration is required".to_string(),
-            }
+        let config = self.config.ok_or_else(|| DoorcamError::Component {
+            component: "motion_analyzer_integration_builder".to_string(),
+            message: "Analyzer configuration is required".to_string(),
         })?;
-        
-        let ring_buffer = self.ring_buffer.ok_or_else(|| {
-            DoorcamError::Component {
-                component: "motion_analyzer_integration_builder".to_string(),
-                message: "Ring buffer is required".to_string(),
-            }
+
+        let ring_buffer = self.ring_buffer.ok_or_else(|| DoorcamError::Component {
+            component: "motion_analyzer_integration_builder".to_string(),
+            message: "Ring buffer is required".to_string(),
         })?;
-        
-        let event_bus = self.event_bus.ok_or_else(|| {
-            DoorcamError::Component {
-                component: "motion_analyzer_integration_builder".to_string(),
-                message: "Event bus is required".to_string(),
-            }
+
+        let event_bus = self.event_bus.ok_or_else(|| DoorcamError::Component {
+            component: "motion_analyzer_integration_builder".to_string(),
+            message: "Event bus is required".to_string(),
         })?;
-        
+
         MotionAnalyzerIntegration::new(config, ring_buffer, event_bus).await
     }
 }
@@ -400,7 +400,7 @@ mod tests {
     use crate::events::EventBus;
     use crate::ring_buffer::RingBufferBuilder;
     use std::time::Duration;
-    
+
     #[tokio::test]
     async fn test_motion_analyzer_integration_creation() {
         let config = AnalyzerConfig {
@@ -410,26 +410,24 @@ mod tests {
             hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
-        
+
         let ring_buffer = RingBufferBuilder::new()
             .capacity(30)
             .preroll_duration(Duration::from_secs(5))
-            .build().unwrap();
-        
+            .build()
+            .unwrap();
+
         let event_bus = Arc::new(EventBus::new(100));
-        
-        let integration = MotionAnalyzerIntegration::new(
-            config,
-            Arc::new(ring_buffer),
-            event_bus,
-        ).await;
-        
+
+        let integration =
+            MotionAnalyzerIntegration::new(config, Arc::new(ring_buffer), event_bus).await;
+
         assert!(integration.is_ok());
-        
+
         let integration = integration.unwrap();
         assert!(!integration.is_running().await);
     }
-    
+
     #[tokio::test]
     async fn test_motion_analyzer_integration_builder() {
         let config = AnalyzerConfig {
@@ -439,24 +437,25 @@ mod tests {
             hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
-        
+
         let ring_buffer = RingBufferBuilder::new()
             .capacity(30)
             .preroll_duration(Duration::from_secs(5))
-            .build().unwrap();
-        
+            .build()
+            .unwrap();
+
         let event_bus = Arc::new(EventBus::new(100));
-        
+
         let integration = MotionAnalyzerIntegrationBuilder::new()
             .with_config(config)
             .with_ring_buffer(Arc::new(ring_buffer))
             .with_event_bus(event_bus)
             .build()
             .await;
-        
+
         assert!(integration.is_ok());
     }
-    
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_motion_analyzer_integration_start_stop() {
         let config = AnalyzerConfig {
@@ -466,29 +465,27 @@ mod tests {
             hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
-        
+
         let ring_buffer = RingBufferBuilder::new()
             .capacity(30)
             .preroll_duration(Duration::from_secs(5))
-            .build().unwrap();
-        
+            .build()
+            .unwrap();
+
         let event_bus = Arc::new(EventBus::new(100));
-        
-        let mut integration = MotionAnalyzerIntegration::new(
-            config,
-            Arc::new(ring_buffer),
-            event_bus,
-        ).await.unwrap();
-        
+
+        let mut integration =
+            MotionAnalyzerIntegration::new(config, Arc::new(ring_buffer), event_bus)
+                .await
+                .unwrap();
+
         // Test that start can be called without hanging
-        let start_result = tokio::time::timeout(
-            Duration::from_millis(200),
-            integration.start()
-        ).await;
+        let start_result =
+            tokio::time::timeout(Duration::from_millis(200), integration.start()).await;
         assert!(start_result.is_ok());
         assert!(start_result.unwrap().is_ok());
         assert!(integration.is_running().await);
-        
+
         // For the test, we'll just verify the running state changed
         // The actual stop operation with task cleanup is complex and may take time
         // in a real scenario, so we'll just test that the flag can be set
@@ -498,7 +495,7 @@ mod tests {
         }
         assert!(!integration.is_running().await);
     }
-    
+
     #[tokio::test]
     async fn test_config_update() {
         let initial_config = AnalyzerConfig {
@@ -508,20 +505,20 @@ mod tests {
             hardware_acceleration: true,
             jpeg_decode_scale: 4,
         };
-        
+
         let ring_buffer = RingBufferBuilder::new()
             .capacity(30)
             .preroll_duration(Duration::from_secs(5))
-            .build().unwrap();
-        
+            .build()
+            .unwrap();
+
         let event_bus = Arc::new(EventBus::new(100));
-        
-        let integration = MotionAnalyzerIntegration::new(
-            initial_config,
-            Arc::new(ring_buffer),
-            event_bus,
-        ).await.unwrap();
-        
+
+        let integration =
+            MotionAnalyzerIntegration::new(initial_config, Arc::new(ring_buffer), event_bus)
+                .await
+                .unwrap();
+
         let new_config = AnalyzerConfig {
             fps: 10,
             delta_threshold: 30,
@@ -529,9 +526,9 @@ mod tests {
             hardware_acceleration: false,
             jpeg_decode_scale: 4,
         };
-        
+
         assert!(integration.update_config(new_config.clone()).await.is_ok());
-        
+
         let current_config = integration.get_config().await;
         assert_eq!(current_config.fps, 10);
         assert_eq!(current_config.contour_minimum_area, 2000.0);

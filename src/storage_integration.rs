@@ -2,7 +2,7 @@ use crate::{
     config::{CaptureConfig, SystemConfig},
     error::{DoorcamError, Result},
     events::EventBus,
-    storage::{EventStorage, StorageStats, CleanupResult},
+    storage::{CleanupResult, EventStorage, StorageStats},
 };
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -64,14 +64,17 @@ impl EventStorageIntegrationBuilder {
 
     /// Build the EventStorageIntegration
     pub fn build(self) -> Result<EventStorageIntegration> {
-        let capture_config = self.capture_config
-            .ok_or_else(|| DoorcamError::component("storage_integration", "Capture config is required"))?;
-        
-        let system_config = self.system_config
-            .ok_or_else(|| DoorcamError::component("storage_integration", "System config is required"))?;
-        
-        let event_bus = self.event_bus
-            .ok_or_else(|| DoorcamError::component("storage_integration", "Event bus is required"))?;
+        let capture_config = self.capture_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Capture config is required")
+        })?;
+
+        let system_config = self.system_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "System config is required")
+        })?;
+
+        let event_bus = self.event_bus.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Event bus is required")
+        })?;
 
         let storage = Arc::new(EventStorage::new(capture_config, system_config, event_bus));
 
@@ -100,7 +103,10 @@ impl EventStorageIntegration {
         {
             let mut running = self.running.write().await;
             if *running {
-                return Err(DoorcamError::component("storage_integration", "Already running"));
+                return Err(DoorcamError::component(
+                    "storage_integration",
+                    "Already running",
+                ));
             }
             *running = true;
         }
@@ -130,10 +136,10 @@ impl EventStorageIntegration {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(300)); // Every 5 minutes
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Check if still running
                 {
                     let running_guard = running.read().await;
@@ -153,15 +159,13 @@ impl EventStorageIntegration {
     /// Update monitoring statistics
     async fn update_monitoring_stats(
         storage: &Arc<EventStorage>,
-        _stats: &Arc<RwLock<StorageIntegrationStats>>
+        _stats: &Arc<RwLock<StorageIntegrationStats>>,
     ) -> Result<()> {
         let storage_stats = storage.get_storage_stats().await;
-        
+
         debug!(
             "Storage monitoring: {} events, {} bytes, last cleanup: {:?}",
-            storage_stats.total_events,
-            storage_stats.total_size_bytes,
-            storage_stats.last_cleanup
+            storage_stats.total_events, storage_stats.total_size_bytes, storage_stats.last_cleanup
         );
 
         // Log warnings for large storage usage
@@ -193,9 +197,9 @@ impl EventStorageIntegration {
     /// Run manual cleanup
     pub async fn run_manual_cleanup(&self) -> Result<CleanupResult> {
         info!("Running manual cleanup");
-        
+
         let result = self.storage.run_cleanup().await?;
-        
+
         // Update stats
         {
             let mut stats = self.stats.write().await;
@@ -203,7 +207,7 @@ impl EventStorageIntegration {
             stats.total_events_deleted += result.events_deleted as u64;
             stats.total_bytes_freed += result.bytes_freed;
             stats.last_cleanup_result = Some(result.clone());
-            
+
             if !result.errors.is_empty() {
                 stats.cleanup_errors += 1;
             }
@@ -211,8 +215,7 @@ impl EventStorageIntegration {
 
         info!(
             "Manual cleanup completed: {} events deleted, {} bytes freed",
-            result.events_deleted,
-            result.bytes_freed
+            result.events_deleted, result.bytes_freed
         );
 
         Ok(result)
@@ -220,10 +223,16 @@ impl EventStorageIntegration {
 
     /// Run cleanup with custom retention period
     pub async fn run_cleanup_with_retention(&self, retention_days: u32) -> Result<CleanupResult> {
-        info!("Running cleanup with custom retention: {} days", retention_days);
-        
-        let result = self.storage.run_cleanup_with_retention(retention_days).await?;
-        
+        info!(
+            "Running cleanup with custom retention: {} days",
+            retention_days
+        );
+
+        let result = self
+            .storage
+            .run_cleanup_with_retention(retention_days)
+            .await?;
+
         // Update stats
         {
             let mut stats = self.stats.write().await;
@@ -231,7 +240,7 @@ impl EventStorageIntegration {
             stats.total_events_deleted += result.events_deleted as u64;
             stats.total_bytes_freed += result.bytes_freed;
             stats.last_cleanup_result = Some(result.clone());
-            
+
             if !result.errors.is_empty() {
                 stats.cleanup_errors += 1;
             }
@@ -239,8 +248,7 @@ impl EventStorageIntegration {
 
         info!(
             "Custom cleanup completed: {} events deleted, {} bytes freed",
-            result.events_deleted,
-            result.bytes_freed
+            result.events_deleted, result.bytes_freed
         );
 
         Ok(result)
@@ -282,9 +290,9 @@ impl EventStorageIntegration {
     /// Delete a specific event by ID
     pub async fn delete_event(&self, event_id: &str) -> Result<u64> {
         info!("Manually deleting event: {}", event_id);
-        
+
         let bytes_freed = self.storage.delete_event_by_id(event_id).await?;
-        
+
         // Update stats
         {
             let mut stats = self.stats.write().await;
@@ -297,12 +305,19 @@ impl EventStorageIntegration {
     }
 
     /// Get events in a time range
-    pub async fn get_events_in_range(&self, start: SystemTime, end: SystemTime) -> Vec<crate::storage::StoredEventMetadata> {
+    pub async fn get_events_in_range(
+        &self,
+        start: SystemTime,
+        end: SystemTime,
+    ) -> Vec<crate::storage::StoredEventMetadata> {
         self.storage.get_events_in_range(start, end).await
     }
 
     /// Get recent events
-    pub async fn get_recent_events(&self, count: usize) -> Vec<crate::storage::StoredEventMetadata> {
+    pub async fn get_recent_events(
+        &self,
+        count: usize,
+    ) -> Vec<crate::storage::StoredEventMetadata> {
         self.storage.get_recent_events(count).await
     }
 
@@ -375,13 +390,17 @@ impl EventStorageIntegration {
 
         // Check cleanup errors
         if integration_stats.cleanup_errors > 0 {
-            issues.push(format!("Cleanup errors detected: {}", integration_stats.cleanup_errors));
+            issues.push(format!(
+                "Cleanup errors detected: {}",
+                integration_stats.cleanup_errors
+            ));
         }
 
         // Check last cleanup
         if let Some(last_cleanup) = storage_stats.last_cleanup {
             if let Ok(elapsed) = last_cleanup.elapsed() {
-                if elapsed > Duration::from_secs(25 * 3600) { // 25 hours
+                if elapsed > Duration::from_secs(25 * 3600) {
+                    // 25 hours
                     issues.push("Last cleanup was more than 25 hours ago".to_string());
                 }
             }
@@ -398,7 +417,8 @@ impl EventStorageIntegration {
             ));
         }
 
-        if cleanup_status.bytes_eligible_for_cleanup > 5 * 1024 * 1024 * 1024 { // 5 GB
+        if cleanup_status.bytes_eligible_for_cleanup > 5 * 1024 * 1024 * 1024 {
+            // 5 GB
             issues.push(format!(
                 "Large amount of data eligible for cleanup: {:.2} GB",
                 cleanup_status.bytes_eligible_for_cleanup as f64 / (1024.0 * 1024.0 * 1024.0)
@@ -555,7 +575,7 @@ mod tests {
             .unwrap();
 
         let health = integration.get_health_status().await;
-        
+
         // Should have some issues since it's not running
         assert!(!health.issues.is_empty());
         assert_ne!(health.status, HealthStatus::Healthy);

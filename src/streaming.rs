@@ -1,9 +1,9 @@
 use crate::{
     config::{Rotation, StreamConfig},
+    error::{DoorcamError, Result, StreamError},
     events::{DoorcamEvent, EventBus},
     frame::{FrameData, FrameFormat},
     ring_buffer::RingBuffer,
-    error::{DoorcamError, Result, StreamError},
 };
 use axum::{
     extract::State,
@@ -42,9 +42,7 @@ impl StreamServer {
         event_bus: Arc<EventBus>,
         target_fps: u32,
     ) -> Self {
-        let target_frame_interval = Duration::from_micros(
-            1_000_000u64 / target_fps.max(1) as u64
-        );
+        let target_frame_interval = Duration::from_micros(1_000_000u64 / target_fps.max(1) as u64);
 
         Self {
             config,
@@ -70,22 +68,23 @@ impl StreamServer {
             .with_state(state);
 
         let addr = format!("{}:{}", self.config.ip, self.config.port);
-        
+
         info!("Starting MJPEG streaming server on {}", addr);
-        
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .map_err(|e| StreamError::BindFailed { 
-                address: addr.clone(), 
-                source: e 
-            })?;
+
+        let listener =
+            tokio::net::TcpListener::bind(&addr)
+                .await
+                .map_err(|e| StreamError::BindFailed {
+                    address: addr.clone(),
+                    source: e,
+                })?;
 
         info!("MJPEG server listening on {}", addr);
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| StreamError::StartupFailed { 
-                details: format!("Server error: {}", e) 
+            .map_err(|e| StreamError::StartupFailed {
+                details: format!("Server error: {}", e),
             })?;
 
         Ok(())
@@ -93,9 +92,7 @@ impl StreamServer {
 }
 
 /// Handler for MJPEG streaming endpoint
-async fn mjpeg_stream_handler(
-    State(state): State<ServerState>,
-) -> impl IntoResponse {
+async fn mjpeg_stream_handler(State(state): State<ServerState>) -> impl IntoResponse {
     info!("New MJPEG stream client connected");
 
     let stream = async_stream::stream! {
@@ -133,7 +130,7 @@ async fn mjpeg_stream_handler(
 
                         debug!(
                             "Streaming frame {} ({} bytes, {} total frames, {:.1} MB total)",
-                            frame.id, 
+                            frame.id,
                             frame_size,
                             frames_streamed,
                             bytes_streamed as f64 / 1_048_576.0
@@ -155,13 +152,13 @@ async fn mjpeg_stream_handler(
                     }
                     Err(e) => {
                         error!("Failed to prepare frame {} for streaming: {}", frame.id, e);
-                        
+
                         // Publish error event
                         let _ = state.event_bus.publish(DoorcamEvent::SystemError {
                             component: "stream_server".to_string(),
                             error: format!("Frame preparation failed: {}", e),
                         }).await;
-                        
+
                         // Continue with next frame instead of breaking the stream
                     }
                 }
@@ -172,7 +169,7 @@ async fn mjpeg_stream_handler(
                 let elapsed = stream_start.elapsed();
                 let fps = frames_streamed as f64 / elapsed.as_secs_f64();
                 let mbps = (bytes_streamed as f64 / elapsed.as_secs_f64()) / 1_048_576.0;
-                
+
                 info!(
                     "Streaming stats: {} frames, {:.1} FPS, {:.2} MB/s, {} total MB",
                     frames_streamed,
@@ -186,7 +183,10 @@ async fn mjpeg_stream_handler(
 
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "multipart/x-mixed-replace; boundary=FRAME")
+        .header(
+            header::CONTENT_TYPE,
+            "multipart/x-mixed-replace; boundary=FRAME",
+        )
         .header(header::CACHE_CONTROL, "no-cache, private")
         .header(header::PRAGMA, "no-cache")
         .header("Access-Control-Allow-Origin", "*")
@@ -196,12 +196,10 @@ async fn mjpeg_stream_handler(
 }
 
 /// Handler for health check endpoint
-async fn health_handler(
-    State(state): State<ServerState>,
-) -> impl IntoResponse {
+async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
     let latest_frame = state.ring_buffer.get_latest_frame().await;
     let stats = state.ring_buffer.stats();
-    
+
     let health_info = serde_json::json!({
         "status": "healthy",
         "frames_available": latest_frame.is_some(),
@@ -220,9 +218,7 @@ async fn health_handler(
 }
 
 /// Simple HTML page for viewing the MJPEG stream with optional CSS rotation
-async fn stream_page_handler(
-    State(state): State<ServerState>,
-) -> impl IntoResponse {
+async fn stream_page_handler(State(state): State<ServerState>) -> impl IntoResponse {
     let rotation_deg = rotation_to_degrees(state.stream_rotation);
 
     let html = format!(
@@ -304,7 +300,7 @@ async fn encode_yuyv_to_jpeg(frame: &FrameData) -> Result<Vec<u8>> {
         "YUYV to JPEG encoding for frame {} not yet implemented - using placeholder",
         frame.id
     );
-    
+
     create_placeholder_jpeg(frame.width, frame.height, "YUYV")
 }
 
@@ -316,7 +312,7 @@ async fn encode_rgb24_to_jpeg(frame: &FrameData) -> Result<Vec<u8>> {
         "RGB24 to JPEG encoding for frame {} not yet implemented - using placeholder",
         frame.id
     );
-    
+
     create_placeholder_jpeg(frame.width, frame.height, "RGB24")
 }
 
@@ -325,10 +321,10 @@ async fn encode_rgb24_to_jpeg(frame: &FrameData) -> Result<Vec<u8>> {
 fn create_placeholder_jpeg(width: u32, height: u32, source_format: &str) -> Result<Vec<u8>> {
     // Create a more comprehensive JPEG header with proper dimensions
     let mut jpeg_data = Vec::new();
-    
+
     // SOI (Start of Image)
     jpeg_data.extend_from_slice(&[0xFF, 0xD8]);
-    
+
     // APP0 (JFIF header)
     jpeg_data.extend_from_slice(&[0xFF, 0xE0]);
     jpeg_data.extend_from_slice(&[0x00, 0x10]); // Length
@@ -338,7 +334,7 @@ fn create_placeholder_jpeg(width: u32, height: u32, source_format: &str) -> Resu
     jpeg_data.extend_from_slice(&[0x00, 0x48]); // X density (72)
     jpeg_data.extend_from_slice(&[0x00, 0x48]); // Y density (72)
     jpeg_data.extend_from_slice(&[0x00, 0x00]); // Thumbnail width/height (0 = no thumbnail)
-    
+
     // SOF0 (Start of Frame - Baseline DCT)
     jpeg_data.extend_from_slice(&[0xFF, 0xC0]);
     jpeg_data.extend_from_slice(&[0x00, 0x11]); // Length
@@ -346,23 +342,23 @@ fn create_placeholder_jpeg(width: u32, height: u32, source_format: &str) -> Resu
     jpeg_data.extend_from_slice(&[(height >> 8) as u8, height as u8]); // Height
     jpeg_data.extend_from_slice(&[(width >> 8) as u8, width as u8]); // Width
     jpeg_data.extend_from_slice(&[0x03]); // Number of components (3 for YCbCr)
-    // Component 1 (Y)
+                                          // Component 1 (Y)
     jpeg_data.extend_from_slice(&[0x01, 0x22, 0x00]);
     // Component 2 (Cb)
     jpeg_data.extend_from_slice(&[0x02, 0x11, 0x01]);
     // Component 3 (Cr)
     jpeg_data.extend_from_slice(&[0x03, 0x11, 0x01]);
-    
+
     // DHT (Define Huffman Table) - simplified
     jpeg_data.extend_from_slice(&[0xFF, 0xC4]);
     jpeg_data.extend_from_slice(&[0x00, 0x1F]); // Length
     jpeg_data.extend_from_slice(&[0x00]); // Table class and destination
-    // Simplified Huffman table (16 bytes + symbols)
+                                          // Simplified Huffman table (16 bytes + symbols)
     jpeg_data.extend_from_slice(&[0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01]);
     jpeg_data.extend_from_slice(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
     jpeg_data.extend_from_slice(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
     jpeg_data.extend_from_slice(&[0x08, 0x09, 0x0A, 0x0B]);
-    
+
     // SOS (Start of Scan)
     jpeg_data.extend_from_slice(&[0xFF, 0xDA]);
     jpeg_data.extend_from_slice(&[0x00, 0x0C]); // Length
@@ -371,18 +367,21 @@ fn create_placeholder_jpeg(width: u32, height: u32, source_format: &str) -> Resu
     jpeg_data.extend_from_slice(&[0x02, 0x11]); // Component 2
     jpeg_data.extend_from_slice(&[0x03, 0x11]); // Component 3
     jpeg_data.extend_from_slice(&[0x00, 0x3F, 0x00]); // Spectral selection
-    
+
     // Minimal scan data (black image)
     jpeg_data.extend_from_slice(&[0xFF, 0x00]); // Minimal entropy-coded data
-    
+
     // EOI (End of Image)
     jpeg_data.extend_from_slice(&[0xFF, 0xD9]);
-    
+
     debug!(
         "Created placeholder JPEG for {}x{} frame from {} format ({} bytes)",
-        width, height, source_format, jpeg_data.len()
+        width,
+        height,
+        source_format,
+        jpeg_data.len()
     );
-    
+
     Ok(jpeg_data)
 }
 
@@ -432,30 +431,35 @@ impl StreamServerBuilder {
     /// Build the stream server
     pub fn build(self) -> Result<StreamServer> {
         let config = self.config.ok_or_else(|| {
-            DoorcamError::Stream(StreamError::StartupFailed { 
-                details: "Stream configuration is required".to_string() 
+            DoorcamError::Stream(StreamError::StartupFailed {
+                details: "Stream configuration is required".to_string(),
             })
         })?;
 
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
-            DoorcamError::Stream(StreamError::StartupFailed { 
-                details: "Ring buffer is required".to_string() 
+            DoorcamError::Stream(StreamError::StartupFailed {
+                details: "Ring buffer is required".to_string(),
             })
         })?;
 
         let event_bus = self.event_bus.ok_or_else(|| {
-            DoorcamError::Stream(StreamError::StartupFailed { 
-                details: "Event bus is required".to_string() 
+            DoorcamError::Stream(StreamError::StartupFailed {
+                details: "Event bus is required".to_string(),
             })
         })?;
 
         let target_fps = self.target_fps.ok_or_else(|| {
             DoorcamError::Stream(StreamError::StartupFailed {
-                details: "Target FPS is required".to_string()
+                details: "Target FPS is required".to_string(),
             })
         })?;
 
-        Ok(StreamServer::new(config, ring_buffer, event_bus, target_fps))
+        Ok(StreamServer::new(
+            config,
+            ring_buffer,
+            event_bus,
+            target_fps,
+        ))
     }
 }
 
@@ -485,7 +489,6 @@ mod tests {
         ring_buffer::RingBuffer,
     };
     use std::time::{Duration, SystemTime};
-
 
     fn create_test_frame(id: u64, format: FrameFormat) -> FrameData {
         let data = match format {
@@ -530,7 +533,7 @@ mod tests {
     async fn test_prepare_frame_for_streaming_mjpeg() {
         let frame = create_test_frame(1, FrameFormat::Mjpeg);
         let result = prepare_frame_for_streaming(&frame).await.unwrap();
-        
+
         // Should return the original JPEG data
         assert_eq!(result, frame.data.as_ref().clone());
     }
@@ -539,7 +542,7 @@ mod tests {
     async fn test_prepare_frame_for_streaming_yuyv() {
         let frame = create_test_frame(1, FrameFormat::Yuyv);
         let result = prepare_frame_for_streaming(&frame).await.unwrap();
-        
+
         // Should return placeholder JPEG (starts with JPEG SOI marker)
         assert!(!result.is_empty());
         assert_eq!(result[0], 0xFF);
@@ -554,7 +557,7 @@ mod tests {
     async fn test_prepare_frame_for_streaming_rgb24() {
         let frame = create_test_frame(1, FrameFormat::Rgb24);
         let result = prepare_frame_for_streaming(&frame).await.unwrap();
-        
+
         // Should return placeholder JPEG (starts with JPEG SOI marker)
         assert!(!result.is_empty());
         assert_eq!(result[0], 0xFF);
@@ -568,16 +571,16 @@ mod tests {
     #[tokio::test]
     async fn test_create_placeholder_jpeg() {
         let jpeg = create_placeholder_jpeg(640, 480, "TEST").unwrap();
-        
+
         // Should start with JPEG SOI marker
         assert_eq!(jpeg[0], 0xFF);
         assert_eq!(jpeg[1], 0xD8);
-        
+
         // Should end with JPEG EOI marker
         let len = jpeg.len();
         assert_eq!(jpeg[len - 2], 0xFF);
         assert_eq!(jpeg[len - 1], 0xD9);
-        
+
         // Should be a reasonable size for a JPEG header
         assert!(jpeg.len() > 50);
     }

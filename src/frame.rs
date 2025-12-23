@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::time::SystemTime;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "motion_analysis")]
 use image::codecs::jpeg::JpegEncoder;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Frame format enumeration supporting different video formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ impl FrameFormat {
             FrameFormat::Rgb24 => 3, // 3 bytes per pixel
         }
     }
-    
+
     /// Check if format is compressed
     pub fn is_compressed(&self) -> bool {
         matches!(self, FrameFormat::Mjpeg)
@@ -89,7 +89,7 @@ impl FrameData {
             format,
         }
     }
-    
+
     /// Get the expected frame size for uncompressed formats
     pub fn expected_size(&self) -> Option<usize> {
         if self.format.is_compressed() {
@@ -98,7 +98,7 @@ impl FrameData {
             Some(self.width as usize * self.height as usize * self.format.bytes_per_pixel())
         }
     }
-    
+
     /// Validate frame data size against expected size
     pub fn validate_size(&self) -> bool {
         match self.expected_size() {
@@ -106,7 +106,7 @@ impl FrameData {
             None => true, // Compressed formats have variable size
         }
     }
-    
+
     /// Get frame age in milliseconds
     pub fn age_ms(&self) -> u64 {
         SystemTime::now()
@@ -114,7 +114,7 @@ impl FrameData {
             .unwrap_or_default()
             .as_millis() as u64
     }
-    
+
     /// Check if frame is older than specified duration
     pub fn is_older_than(&self, duration: std::time::Duration) -> bool {
         SystemTime::now()
@@ -149,7 +149,10 @@ impl ProcessedFrame {
     }
 
     /// Create a processed frame from original frame data with optional rotation
-    pub async fn from_frame(frame: FrameData, rotation: Option<Rotation>) -> Result<Self, crate::error::DoorcamError> {
+    pub async fn from_frame(
+        frame: FrameData,
+        rotation: Option<Rotation>,
+    ) -> Result<Self, crate::error::DoorcamError> {
         let mut processed = Self {
             original: frame,
             rotated: None,
@@ -159,12 +162,13 @@ impl ProcessedFrame {
 
         // Apply rotation if specified
         if let Some(rot) = rotation {
-            processed.rotated = Some(FrameProcessor::apply_rotation(&processed.original, rot).await?);
+            processed.rotated =
+                Some(FrameProcessor::apply_rotation(&processed.original, rot).await?);
         }
 
         Ok(processed)
     }
-    
+
     /// Get JPEG encoded data, encoding if necessary
     pub async fn get_jpeg(&self) -> Result<Arc<Vec<u8>>, crate::error::DoorcamError> {
         // Return cached JPEG if available
@@ -190,31 +194,26 @@ impl ProcessedFrame {
         // Encode to JPEG
         FrameProcessor::encode_jpeg(&source_frame).await
     }
-    
+
     /// Get the most appropriate frame data for the requested purpose
     pub fn get_data_for_purpose(&self, purpose: FramePurpose) -> &Arc<Vec<u8>> {
         match purpose {
-            FramePurpose::Display => {
-                self.display_ready
-                    .as_ref()
-                    .or(self.rotated.as_ref())
-                    .unwrap_or(&self.original.data)
-            }
-            FramePurpose::Streaming => {
-                self.jpeg_encoded
-                    .as_ref()
-                    .or(self.rotated.as_ref())
-                    .unwrap_or(&self.original.data)
-            }
-            FramePurpose::Storage => {
-                self.jpeg_encoded
-                    .as_ref()
-                    .or(self.rotated.as_ref())
-                    .unwrap_or(&self.original.data)
-            }
-            FramePurpose::Analysis => {
-                self.rotated.as_ref().unwrap_or(&self.original.data)
-            }
+            FramePurpose::Display => self
+                .display_ready
+                .as_ref()
+                .or(self.rotated.as_ref())
+                .unwrap_or(&self.original.data),
+            FramePurpose::Streaming => self
+                .jpeg_encoded
+                .as_ref()
+                .or(self.rotated.as_ref())
+                .unwrap_or(&self.original.data),
+            FramePurpose::Storage => self
+                .jpeg_encoded
+                .as_ref()
+                .or(self.rotated.as_ref())
+                .unwrap_or(&self.original.data),
+            FramePurpose::Analysis => self.rotated.as_ref().unwrap_or(&self.original.data),
         }
     }
 }
@@ -289,7 +288,7 @@ impl FrameProcessor {
             Ok(Arc::clone(&frame.data))
         }
     }
-    
+
     /// Convert frame to JPEG format (placeholder for future OpenCV integration)
     pub async fn encode_jpeg(
         frame: &FrameData,
@@ -306,12 +305,12 @@ impl FrameProcessor {
                     frame.id,
                     frame.format
                 );
-                
+
                 Ok(Arc::clone(&frame.data))
             }
         }
     }
-    
+
     /// Convert frame for display (placeholder for future implementation)
     pub async fn prepare_for_display(
         frame: &FrameData,
@@ -324,7 +323,7 @@ impl FrameProcessor {
             frame.format,
             target_format
         );
-        
+
         Ok(Arc::clone(&frame.data))
     }
 }
@@ -333,44 +332,37 @@ impl FrameProcessor {
 mod tests {
     use super::*;
     use std::time::Duration;
-    
+
     #[test]
     fn test_frame_format_properties() {
         assert_eq!(FrameFormat::Mjpeg.bytes_per_pixel(), 0);
         assert_eq!(FrameFormat::Yuyv.bytes_per_pixel(), 2);
         assert_eq!(FrameFormat::Rgb24.bytes_per_pixel(), 3);
-        
+
         assert!(FrameFormat::Mjpeg.is_compressed());
         assert!(!FrameFormat::Yuyv.is_compressed());
         assert!(!FrameFormat::Rgb24.is_compressed());
     }
-    
+
     #[test]
     fn test_rotation_degrees() {
         assert_eq!(Rotation::Rotate90.degrees(), 90);
         assert_eq!(Rotation::Rotate180.degrees(), 180);
         assert_eq!(Rotation::Rotate270.degrees(), 270);
     }
-    
+
     #[test]
     fn test_frame_data_creation() {
         let data = vec![0u8; 1920 * 1080 * 2]; // YUYV data
-        let frame = FrameData::new(
-            1,
-            SystemTime::now(),
-            data,
-            1920,
-            1080,
-            FrameFormat::Yuyv,
-        );
-        
+        let frame = FrameData::new(1, SystemTime::now(), data, 1920, 1080, FrameFormat::Yuyv);
+
         assert_eq!(frame.id, 1);
         assert_eq!(frame.width, 1920);
         assert_eq!(frame.height, 1080);
         assert_eq!(frame.format, FrameFormat::Yuyv);
         assert!(frame.validate_size());
     }
-    
+
     #[test]
     fn test_frame_size_validation() {
         // Valid YUYV frame
@@ -384,7 +376,7 @@ mod tests {
             FrameFormat::Yuyv,
         );
         assert!(valid_frame.validate_size());
-        
+
         // Invalid YUYV frame (wrong size)
         let invalid_data = vec![0u8; 100];
         let invalid_frame = FrameData::new(
@@ -396,7 +388,7 @@ mod tests {
             FrameFormat::Yuyv,
         );
         assert!(!invalid_frame.validate_size());
-        
+
         // MJPEG frame (compressed, always valid)
         let mjpeg_data = vec![0u8; 5000];
         let mjpeg_frame = FrameData::new(
@@ -409,25 +401,18 @@ mod tests {
         );
         assert!(mjpeg_frame.validate_size());
     }
-    
+
     #[tokio::test]
     async fn test_frame_age() {
         let past_time = SystemTime::now() - Duration::from_millis(100);
-        let frame = FrameData::new(
-            1,
-            past_time,
-            vec![0u8; 100],
-            640,
-            480,
-            FrameFormat::Mjpeg,
-        );
-        
+        let frame = FrameData::new(1, past_time, vec![0u8; 100], 640, 480, FrameFormat::Mjpeg);
+
         // Frame should be older than 50ms
         assert!(frame.is_older_than(Duration::from_millis(50)));
         // Frame should not be older than 200ms
         assert!(!frame.is_older_than(Duration::from_millis(200)));
     }
-    
+
     #[test]
     fn test_processed_frame() {
         let frame = FrameData::new(
@@ -438,16 +423,18 @@ mod tests {
             480,
             FrameFormat::Mjpeg,
         );
-        
+
         let processed = ProcessedFrame::new(frame);
-        
+
         // Should return original data when no processing is done
         assert_eq!(
             processed.get_data_for_purpose(FramePurpose::Display).len(),
             100
         );
         assert_eq!(
-            processed.get_data_for_purpose(FramePurpose::Streaming).len(),
+            processed
+                .get_data_for_purpose(FramePurpose::Streaming)
+                .len(),
             100
         );
     }

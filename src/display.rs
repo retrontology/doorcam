@@ -1,11 +1,11 @@
 use crate::config::DisplayConfig;
-use crate::events::{DoorcamEvent, EventBus, EventReceiver, EventFilter};
-use crate::frame::{FrameData, FrameFormat};
 use crate::error::{DisplayError, Result};
+use crate::events::{DoorcamEvent, EventBus, EventFilter, EventReceiver};
+use crate::frame::{FrameData, FrameFormat};
 use std::fs::{File, OpenOptions};
-use std::io::{Write, Seek, SeekFrom};
-use std::sync::Arc;
+use std::io::{Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -39,10 +39,8 @@ impl DisplayController {
         #[cfg(all(feature = "display", target_os = "linux"))]
         {
             // Initialize GStreamer
-            gstreamer::init().map_err(|e| {
-                DisplayError::Framebuffer {
-                    details: format!("Failed to initialize GStreamer: {}", e),
-                }
+            gstreamer::init().map_err(|e| DisplayError::Framebuffer {
+                details: format!("Failed to initialize GStreamer: {}", e),
             })?;
         }
 
@@ -68,7 +66,7 @@ impl DisplayController {
     #[cfg(all(feature = "display", target_os = "linux"))]
     async fn initialize_display_pipeline(&self) -> Result<()> {
         let (display_width, display_height) = self.config.resolution;
-        
+
         // Calculate pre-rotation dimensions based on rotation angle
         // For 90/270 degree rotations, we need to swap dimensions before rotating
         let (pre_rotation_width, pre_rotation_height) = match &self.config.rotation {
@@ -81,14 +79,17 @@ impl DisplayController {
                 (display_width, display_height)
             }
         };
-        
-        info!("Using display JPEG decode scale 1/{}", self.config.jpeg_decode_scale);
+
+        info!(
+            "Using display JPEG decode scale 1/{}",
+            self.config.jpeg_decode_scale
+        );
 
         // Build hardware-accelerated display pipeline with efficient JPEG decoding
         // Note: Using software jpegdec for display - v4l2jpegdec causes pipeline stalls
         // Hardware decoder works fine for video encoding but not for live display
         let mut pipeline_desc = "appsrc name=src format=bytes is-live=true caps=image/jpeg ! queue max-size-buffers=1 leaky=downstream ! jpegdec".to_string();
-        
+
         // First downsize to pre-rotation dimensions
         // Use nearest-neighbour scaling for better performance (faster than bilinear)
         pipeline_desc.push_str(&format!(
@@ -97,15 +98,15 @@ impl DisplayController {
              video/x-raw,width={},height={}",
             pre_rotation_width, pre_rotation_height
         ));
-        
+
         // Then add rotation if configured (now operating on smaller image)
         if let Some(rotation) = &self.config.rotation {
             let flip_method = match rotation {
                 crate::config::Rotation::Rotate90 => "clockwise",
-                crate::config::Rotation::Rotate180 => "rotate-180", 
+                crate::config::Rotation::Rotate180 => "rotate-180",
                 crate::config::Rotation::Rotate270 => "counterclockwise",
             };
-            
+
             pipeline_desc.push_str(&format!(" ! videoflip method={}", flip_method));
             let degrees = match rotation {
                 crate::config::Rotation::Rotate90 => 90,
@@ -115,7 +116,7 @@ impl DisplayController {
             info!("Display rotation enabled: {} degrees ({}) - scaling to {}x{} before rotation to achieve final {}x{}", 
                   degrees, flip_method, pre_rotation_width, pre_rotation_height, display_width, display_height);
         }
-        
+
         // Final format conversion and output with optimized buffering
         pipeline_desc.push_str(&format!(
             " ! videoconvert ! \
@@ -184,7 +185,10 @@ impl DisplayController {
                 info!("Backlight device opened: {}", self.config.backlight_device);
             }
             Err(e) => {
-                warn!("Failed to open backlight device {}: {}", self.config.backlight_device, e);
+                warn!(
+                    "Failed to open backlight device {}: {}",
+                    self.config.backlight_device, e
+                );
                 // Continue without backlight control - will be retried later
             }
         }
@@ -205,10 +209,7 @@ impl DisplayController {
     }
 
     /// Start the display controller with event handling
-    pub async fn start(
-        &self,
-        event_bus: Arc<EventBus>,
-    ) -> Result<()> {
+    pub async fn start(&self, event_bus: Arc<EventBus>) -> Result<()> {
         info!("Starting display controller");
 
         // Subscribe to relevant events
@@ -219,7 +220,8 @@ impl DisplayController {
             "display_activate",
             "display_deactivate",
         ]);
-        let mut event_receiver = EventReceiver::new(receiver, filter, "display_controller".to_string());
+        let mut event_receiver =
+            EventReceiver::new(receiver, filter, "display_controller".to_string());
 
         // Clone references for the event handling task
         let controller = self.clone_for_task();
@@ -257,9 +259,16 @@ impl DisplayController {
                 debug!("Touch detected - activating display");
                 self.activate_display(timestamp, event_bus).await?;
             }
-            DoorcamEvent::DisplayActivate { timestamp, duration_seconds } => {
-                debug!("Display activation requested for {} seconds", duration_seconds);
-                self.activate_display_with_duration(timestamp, duration_seconds, event_bus).await?;
+            DoorcamEvent::DisplayActivate {
+                timestamp,
+                duration_seconds,
+            } => {
+                debug!(
+                    "Display activation requested for {} seconds",
+                    duration_seconds
+                );
+                self.activate_display_with_duration(timestamp, duration_seconds, event_bus)
+                    .await?;
             }
             DoorcamEvent::DisplayDeactivate { .. } => {
                 debug!("Display deactivation requested");
@@ -273,12 +282,17 @@ impl DisplayController {
     }
 
     /// Activate the display for the configured duration
-    async fn activate_display(&self, _timestamp: SystemTime, event_bus: &Arc<EventBus>) -> Result<()> {
+    async fn activate_display(
+        &self,
+        _timestamp: SystemTime,
+        event_bus: &Arc<EventBus>,
+    ) -> Result<()> {
         self.activate_display_with_duration(
             SystemTime::now(),
             self.config.activation_period_seconds,
-            event_bus
-        ).await
+            event_bus,
+        )
+        .await
     }
 
     /// Activate the display for a specific duration
@@ -309,14 +323,16 @@ impl DisplayController {
 
         let timer_handle = tokio::spawn(async move {
             sleep(duration).await;
-            
+
             // Deactivate display
             is_active.store(false, Ordering::Relaxed);
-            
+
             // Publish deactivation event
-            let _ = event_bus_clone.publish(DoorcamEvent::DisplayDeactivate {
-                timestamp: SystemTime::now(),
-            }).await;
+            let _ = event_bus_clone
+                .publish(DoorcamEvent::DisplayDeactivate {
+                    timestamp: SystemTime::now(),
+                })
+                .await;
         });
 
         // Store the timer handle
@@ -352,28 +368,33 @@ impl DisplayController {
     /// Control backlight on/off state
     async fn set_backlight(&self, enabled: bool) -> Result<()> {
         let mut backlight = self.backlight.write().await;
-        
+
         if let Some(ref mut bl_file) = *backlight {
             // For bl_power: "0" = ON, "1" = OFF (inverted logic)
             let power_value = if enabled { "0" } else { "1" };
-            
+
             // Seek to beginning and write power value
-            bl_file.seek(SeekFrom::Start(0))
-                .map_err(|e| DisplayError::Backlight { 
-                    details: format!("Failed to seek backlight: {}", e) 
+            bl_file
+                .seek(SeekFrom::Start(0))
+                .map_err(|e| DisplayError::Backlight {
+                    details: format!("Failed to seek backlight: {}", e),
                 })?;
-            
-            bl_file.write_all(power_value.as_bytes())
-                .map_err(|e| DisplayError::Backlight { 
-                    details: format!("Failed to write backlight: {}", e) 
+
+            bl_file
+                .write_all(power_value.as_bytes())
+                .map_err(|e| DisplayError::Backlight {
+                    details: format!("Failed to write backlight: {}", e),
                 })?;
-            
-            bl_file.flush()
-                .map_err(|e| DisplayError::Backlight { 
-                    details: format!("Failed to flush backlight: {}", e) 
-                })?;
-            
-            debug!("Backlight set to: {} (power value: {})", if enabled { "ON" } else { "OFF" }, power_value);
+
+            bl_file.flush().map_err(|e| DisplayError::Backlight {
+                details: format!("Failed to flush backlight: {}", e),
+            })?;
+
+            debug!(
+                "Backlight set to: {} (power value: {})",
+                if enabled { "ON" } else { "OFF" },
+                power_value
+            );
         } else {
             // Try to reinitialize backlight
             match self.open_backlight().await {
@@ -386,23 +407,28 @@ impl DisplayController {
                     if let Some(ref mut bl_file) = *backlight_retry {
                         // For bl_power: "0" = ON, "1" = OFF (inverted logic)
                         let power_value = if enabled { "0" } else { "1" };
-                        
-                        bl_file.seek(SeekFrom::Start(0))
-                            .map_err(|e| DisplayError::Backlight { 
-                                details: format!("Failed to seek backlight: {}", e) 
+
+                        bl_file
+                            .seek(SeekFrom::Start(0))
+                            .map_err(|e| DisplayError::Backlight {
+                                details: format!("Failed to seek backlight: {}", e),
                             })?;
-                        
-                        bl_file.write_all(power_value.as_bytes())
-                            .map_err(|e| DisplayError::Backlight { 
-                                details: format!("Failed to write backlight: {}", e) 
-                            })?;
-                        
-                        bl_file.flush()
-                            .map_err(|e| DisplayError::Backlight { 
-                                details: format!("Failed to flush backlight: {}", e) 
-                            })?;
-                        
-                        debug!("Backlight set to: {} (power value: {})", if enabled { "ON" } else { "OFF" }, power_value);
+
+                        bl_file.write_all(power_value.as_bytes()).map_err(|e| {
+                            DisplayError::Backlight {
+                                details: format!("Failed to write backlight: {}", e),
+                            }
+                        })?;
+
+                        bl_file.flush().map_err(|e| DisplayError::Backlight {
+                            details: format!("Failed to flush backlight: {}", e),
+                        })?;
+
+                        debug!(
+                            "Backlight set to: {} (power value: {})",
+                            if enabled { "ON" } else { "OFF" },
+                            power_value
+                        );
                     }
                 }
                 Err(e) => {
@@ -410,7 +436,7 @@ impl DisplayController {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -443,10 +469,11 @@ impl DisplayController {
         if let (Some(pipeline), Some(appsrc)) = (pipeline_lock.as_ref(), appsrc_lock.as_ref()) {
             // Start pipeline if not already playing
             if pipeline.current_state() != gstreamer::State::Playing {
-                pipeline.set_state(gstreamer::State::Playing)
-                    .map_err(|e| DisplayError::Framebuffer {
+                pipeline.set_state(gstreamer::State::Playing).map_err(|e| {
+                    DisplayError::Framebuffer {
                         details: format!("Failed to start display pipeline: {}", e),
-                    })?;
+                    }
+                })?;
                 debug!("Display pipeline started");
             }
 
@@ -458,20 +485,26 @@ impl DisplayController {
                 }
                 _ => {
                     return Err(DisplayError::Framebuffer {
-                        details: format!("Only MJPEG frames supported for GStreamer display, got {:?}", frame.format),
-                    }.into());
+                        details: format!(
+                            "Only MJPEG frames supported for GStreamer display, got {:?}",
+                            frame.format
+                        ),
+                    }
+                    .into());
                 }
             };
 
             // Create GStreamer buffer from JPEG data
-            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len())
-                .map_err(|e| DisplayError::Framebuffer {
+            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len()).map_err(|e| {
+                DisplayError::Framebuffer {
                     details: format!("Failed to create GStreamer buffer: {}", e),
-                })?;
+                }
+            })?;
 
             {
                 let buffer_ref = buffer.get_mut().unwrap();
-                let mut map = buffer_ref.map_writable()
+                let mut map = buffer_ref
+                    .map_writable()
                     .map_err(|e| DisplayError::Framebuffer {
                         details: format!("Failed to map buffer: {}", e),
                     })?;
@@ -482,7 +515,8 @@ impl DisplayController {
             // For live display, we want immediate rendering without synchronization
 
             // Push buffer to appsrc
-            appsrc.push_buffer(buffer)
+            appsrc
+                .push_buffer(buffer)
                 .map_err(|e| DisplayError::Framebuffer {
                     details: format!("Failed to push buffer to display pipeline: {:?}", e),
                 })?;
@@ -492,7 +526,8 @@ impl DisplayController {
         } else {
             Err(DisplayError::Framebuffer {
                 details: "Display pipeline not initialized".to_string(),
-            }.into())
+            }
+            .into())
         }
     }
 
@@ -527,8 +562,6 @@ impl Clone for DisplayController {
     }
 }
 
-
-
 /// Display format conversion utilities
 pub struct DisplayConverter;
 
@@ -537,23 +570,23 @@ impl DisplayConverter {
     pub fn create_placeholder_rgb565(width: u32, height: u32) -> Result<Vec<u8>> {
         let pixel_count = (width * height) as usize;
         let mut data = Vec::with_capacity(pixel_count * 2);
-        
+
         // Create a simple gradient pattern
         for y in 0..height {
             for x in 0..width {
                 // Create RGB565 pixel (5 bits red, 6 bits green, 5 bits blue)
-                let r = ((x * 31) / width) as u16;  // 5 bits
+                let r = ((x * 31) / width) as u16; // 5 bits
                 let g = ((y * 63) / height) as u16; // 6 bits
                 let b = (((x + y) * 31) / (width + height)) as u16; // 5 bits
-                
+
                 let rgb565 = (r << 11) | (g << 5) | b;
-                
+
                 // Write as little-endian bytes
                 data.push((rgb565 & 0xFF) as u8);
                 data.push((rgb565 >> 8) as u8);
             }
         }
-        
+
         Ok(data)
     }
 
@@ -561,81 +594,94 @@ impl DisplayConverter {
     pub fn rgb24_to_rgb565(rgb24_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
         let expected_size = (width * height * 3) as usize;
         if rgb24_data.len() != expected_size {
-            return Err(DisplayError::FormatConversion { 
-                details: format!("Invalid RGB24 data size: expected {}, got {}", expected_size, rgb24_data.len()) 
-            }.into());
+            return Err(DisplayError::FormatConversion {
+                details: format!(
+                    "Invalid RGB24 data size: expected {}, got {}",
+                    expected_size,
+                    rgb24_data.len()
+                ),
+            }
+            .into());
         }
 
         let mut rgb565_data = Vec::with_capacity((width * height * 2) as usize);
-        
+
         for chunk in rgb24_data.chunks_exact(3) {
-            let r = chunk[0] >> 3;  // 8 bits -> 5 bits
-            let g = chunk[1] >> 2;  // 8 bits -> 6 bits
-            let b = chunk[2] >> 3;  // 8 bits -> 5 bits
-            
+            let r = chunk[0] >> 3; // 8 bits -> 5 bits
+            let g = chunk[1] >> 2; // 8 bits -> 6 bits
+            let b = chunk[2] >> 3; // 8 bits -> 5 bits
+
             let rgb565 = ((r as u16) << 11) | ((g as u16) << 5) | (b as u16);
-            
+
             // Write as little-endian
             rgb565_data.push((rgb565 & 0xFF) as u8);
             rgb565_data.push((rgb565 >> 8) as u8);
         }
-        
+
         Ok(rgb565_data)
     }
 
     /// Scale RGB565 data to target resolution using simple nearest neighbor
     pub fn scale_rgb565(
-        data: &[u8], 
-        src_width: u32, 
-        src_height: u32, 
-        dst_width: u32, 
-        dst_height: u32
+        data: &[u8],
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
     ) -> Result<Vec<u8>> {
         if data.len() != (src_width * src_height * 2) as usize {
-            return Err(DisplayError::FormatConversion { 
-                details: format!("Invalid RGB565 data size: expected {}, got {}", 
-                               src_width * src_height * 2, data.len()) 
-            }.into());
+            return Err(DisplayError::FormatConversion {
+                details: format!(
+                    "Invalid RGB565 data size: expected {}, got {}",
+                    src_width * src_height * 2,
+                    data.len()
+                ),
+            }
+            .into());
         }
 
         let mut scaled_data = Vec::with_capacity((dst_width * dst_height * 2) as usize);
-        
+
         let x_ratio = src_width as f32 / dst_width as f32;
         let y_ratio = src_height as f32 / dst_height as f32;
-        
+
         for dst_y in 0..dst_height {
             for dst_x in 0..dst_width {
                 let src_x = ((dst_x as f32) * x_ratio) as u32;
                 let src_y = ((dst_y as f32) * y_ratio) as u32;
-                
+
                 // Ensure we don't go out of bounds
                 let src_x = src_x.min(src_width - 1);
                 let src_y = src_y.min(src_height - 1);
-                
+
                 let src_index = ((src_y * src_width + src_x) * 2) as usize;
-                
+
                 // Copy the RGB565 pixel (2 bytes)
                 scaled_data.push(data[src_index]);
                 scaled_data.push(data[src_index + 1]);
             }
         }
-        
+
         Ok(scaled_data)
     }
 
     /// Crop RGB565 data to fit within target dimensions (center crop)
     pub fn crop_rgb565(
-        data: &[u8], 
-        src_width: u32, 
-        src_height: u32, 
-        dst_width: u32, 
-        dst_height: u32
+        data: &[u8],
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
     ) -> Result<Vec<u8>> {
         if data.len() != (src_width * src_height * 2) as usize {
-            return Err(DisplayError::FormatConversion { 
-                details: format!("Invalid RGB565 data size: expected {}, got {}", 
-                               src_width * src_height * 2, data.len()) 
-            }.into());
+            return Err(DisplayError::FormatConversion {
+                details: format!(
+                    "Invalid RGB565 data size: expected {}, got {}",
+                    src_width * src_height * 2,
+                    data.len()
+                ),
+            }
+            .into());
         }
 
         // Calculate crop offsets (center crop)
@@ -643,17 +689,17 @@ impl DisplayConverter {
         let crop_height = dst_height.min(src_height);
         let offset_x = (src_width - crop_width) / 2;
         let offset_y = (src_height - crop_height) / 2;
-        
+
         let mut cropped_data = Vec::with_capacity((crop_width * crop_height * 2) as usize);
-        
+
         for y in 0..crop_height {
             let src_y = offset_y + y;
             let src_row_start = (src_y * src_width + offset_x) as usize * 2;
             let src_row_end = src_row_start + (crop_width as usize * 2);
-            
+
             cropped_data.extend_from_slice(&data[src_row_start..src_row_end]);
         }
-        
+
         Ok(cropped_data)
     }
 
@@ -665,7 +711,10 @@ impl DisplayConverter {
         rotation: crate::config::Rotation,
     ) -> Result<Vec<u8>> {
         // TODO: Implement actual rotation in later tasks
-        debug!("Display rotation {:?} requested - placeholder implementation", rotation);
+        debug!(
+            "Display rotation {:?} requested - placeholder implementation",
+            rotation
+        );
         Ok(data.to_vec())
     }
 }
@@ -692,7 +741,7 @@ mod tests {
     #[tokio::test]
     async fn test_display_controller_creation() {
         let config = create_test_config();
-        
+
         // This will fail to open devices, but should not panic
         let result = DisplayController::new(config).await;
         assert!(result.is_ok());
@@ -702,14 +751,14 @@ mod tests {
     async fn test_display_activation_state() {
         let config = create_test_config();
         let controller = DisplayController::new(config).await.unwrap();
-        
+
         // Initially inactive
         assert!(!controller.is_active());
-        
+
         // Activate
         controller.is_active.store(true, Ordering::Relaxed);
         assert!(controller.is_active());
-        
+
         // Deactivate
         controller.is_active.store(false, Ordering::Relaxed);
         assert!(!controller.is_active());
@@ -719,10 +768,10 @@ mod tests {
     async fn test_placeholder_display_data() {
         let config = create_test_config();
         let _controller = DisplayController::new(config).await.unwrap();
-        
+
         // Test the DisplayConverter utility directly
         let data = DisplayConverter::create_placeholder_rgb565(320, 240).unwrap();
-        
+
         // Should be 2 bytes per pixel for RGB565
         assert_eq!(data.len(), 320 * 240 * 2);
     }
@@ -731,16 +780,16 @@ mod tests {
     fn test_rgb24_to_rgb565_conversion() {
         // Test data: red, green, blue pixels
         let rgb24_data = vec![
-            255, 0, 0,    // Red
-            0, 255, 0,    // Green  
-            0, 0, 255,    // Blue
+            255, 0, 0, // Red
+            0, 255, 0, // Green
+            0, 0, 255, // Blue
         ];
-        
+
         let rgb565_data = DisplayConverter::rgb24_to_rgb565(&rgb24_data, 3, 1).unwrap();
-        
+
         // Should be 2 bytes per pixel
         assert_eq!(rgb565_data.len(), 6);
-        
+
         // Verify red pixel (should be 0xF800 in RGB565)
         let red_pixel = ((rgb565_data[1] as u16) << 8) | (rgb565_data[0] as u16);
         assert_eq!(red_pixel & 0xF800, 0xF800); // Red bits should be set
@@ -757,7 +806,7 @@ mod tests {
     async fn test_frame_conversion() {
         let config = create_test_config();
         let _controller = DisplayController::new(config).await.unwrap();
-        
+
         let _frame = FrameData::new(
             1,
             SystemTime::now(),
@@ -766,11 +815,11 @@ mod tests {
             240,
             FrameFormat::Mjpeg,
         );
-        
+
         // Test RGB565 conversion directly
         let rgb24_data = vec![255u8; 320 * 240 * 3];
         let display_data = DisplayConverter::rgb24_to_rgb565(&rgb24_data, 320, 240).unwrap();
-        
+
         // Should produce RGB565 data (2 bytes per pixel)
         assert_eq!(display_data.len(), 320 * 240 * 2);
     }
@@ -780,14 +829,14 @@ mod tests {
         // Create test RGB565 data (2x2 pixels)
         let src_data = vec![
             0x00, 0xF8, // Red pixel
-            0xE0, 0x07, // Green pixel  
+            0xE0, 0x07, // Green pixel
             0x1F, 0x00, // Blue pixel
             0xFF, 0xFF, // White pixel
         ];
-        
+
         // Scale to 4x4
         let scaled_data = DisplayConverter::scale_rgb565(&src_data, 2, 2, 4, 4).unwrap();
-        
+
         // Should be 4x4 pixels = 32 bytes
         assert_eq!(scaled_data.len(), 32);
     }
@@ -796,10 +845,10 @@ mod tests {
     fn test_rgb565_cropping() {
         // Create test RGB565 data (4x4 pixels)
         let src_data = vec![0u8; 4 * 4 * 2]; // 32 bytes
-        
+
         // Crop to 2x2 (center crop)
         let cropped_data = DisplayConverter::crop_rgb565(&src_data, 4, 4, 2, 2).unwrap();
-        
+
         // Should be 2x2 pixels = 8 bytes
         assert_eq!(cropped_data.len(), 8);
     }

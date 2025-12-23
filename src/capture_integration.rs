@@ -1,5 +1,5 @@
 use crate::{
-    capture::{VideoCapture, CaptureStats},
+    capture::{CaptureStats, VideoCapture},
     config::CaptureConfig,
     error::{DoorcamError, Result},
     events::EventBus,
@@ -22,23 +22,20 @@ impl VideoCaptureIntegration {
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
         let capture = VideoCapture::new(config.clone(), event_bus, ring_buffer);
-        
-        Self {
-            capture,
-            config,
-        }
+
+        Self { capture, config }
     }
 
     /// Start the video capture integration
     pub async fn start(&self) -> Result<()> {
         info!("Starting video capture integration");
-        
+
         // Validate configuration
         self.validate_config()?;
-        
+
         // Start the capture system
         self.capture.start().await?;
-        
+
         info!("Video capture integration started successfully");
         Ok(())
     }
@@ -46,9 +43,9 @@ impl VideoCaptureIntegration {
     /// Stop the video capture integration
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping video capture integration");
-        
+
         self.capture.stop().await?;
-        
+
         info!("Video capture integration stopped");
         Ok(())
     }
@@ -68,21 +65,21 @@ impl VideoCaptureIntegration {
         if self.config.preroll_seconds == 0 {
             return Err(DoorcamError::component(
                 "video_capture_integration",
-                "Preroll seconds must be greater than 0"
+                "Preroll seconds must be greater than 0",
             ));
         }
 
         if self.config.postroll_seconds == 0 {
             return Err(DoorcamError::component(
-                "video_capture_integration", 
-                "Postroll seconds must be greater than 0"
+                "video_capture_integration",
+                "Postroll seconds must be greater than 0",
             ));
         }
 
         if self.config.path.is_empty() {
             return Err(DoorcamError::component(
                 "video_capture_integration",
-                "Capture path cannot be empty"
+                "Capture path cannot be empty",
             ));
         }
 
@@ -141,7 +138,10 @@ impl VideoCaptureIntegrationBuilder {
         })?;
 
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
-            DoorcamError::component("video_capture_integration_builder", "Ring buffer is required")
+            DoorcamError::component(
+                "video_capture_integration_builder",
+                "Ring buffer is required",
+            )
         })?;
 
         Ok(VideoCaptureIntegration::new(config, event_bus, ring_buffer))
@@ -157,11 +157,7 @@ impl Default for VideoCaptureIntegrationBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config::CaptureConfig,
-        events::EventBus,
-        ring_buffer::RingBuffer,
-    };
+    use crate::{config::CaptureConfig, events::EventBus, ring_buffer::RingBuffer};
     use std::time::Duration;
 
     fn create_test_config() -> CaptureConfig {
@@ -186,7 +182,7 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration = VideoCaptureIntegration::new(config, event_bus, ring_buffer);
-        
+
         assert_eq!(integration.config().preroll_seconds, 5);
         assert_eq!(integration.config().postroll_seconds, 10);
     }
@@ -215,9 +211,7 @@ mod tests {
 
         // Missing event bus
         let config = create_test_config();
-        let result = VideoCaptureIntegrationBuilder::new()
-            .config(config)
-            .build();
+        let result = VideoCaptureIntegrationBuilder::new().config(config).build();
         assert!(result.is_err());
     }
 
@@ -229,21 +223,23 @@ mod tests {
         // Invalid config - zero preroll
         let mut invalid_config = create_test_config();
         invalid_config.preroll_seconds = 0;
-        
-        let integration = VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
+
+        let integration =
+            VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
         assert!(integration.validate_config().is_err());
 
         // Invalid config - zero postroll
         let mut invalid_config = create_test_config();
         invalid_config.postroll_seconds = 0;
-        
-        let integration = VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
+
+        let integration =
+            VideoCaptureIntegration::new(invalid_config, event_bus.clone(), ring_buffer.clone());
         assert!(integration.validate_config().is_err());
 
         // Invalid config - empty path
         let mut invalid_config = create_test_config();
         invalid_config.path = String::new();
-        
+
         let integration = VideoCaptureIntegration::new(invalid_config, event_bus, ring_buffer);
         assert!(integration.validate_config().is_err());
     }
@@ -255,7 +251,7 @@ mod tests {
         let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
         let integration = VideoCaptureIntegration::new(config, event_bus, ring_buffer);
-        
+
         let stats = integration.get_stats().await;
         assert_eq!(stats.active_captures, 0);
         assert_eq!(stats.total_active_frames, 0);

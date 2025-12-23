@@ -27,7 +27,7 @@ impl KeyboardInputHandler {
     /// Start listening for keyboard input
     pub async fn start(&self) -> Result<()> {
         info!("Starting keyboard input handler - press SPACE to trigger motion event");
-        
+
         let event_bus = Arc::clone(&self.event_bus);
         let cancellation_token = self.cancellation_token.clone();
         let runtime_handle = Handle::current();
@@ -39,9 +39,9 @@ impl KeyboardInputHandler {
                 error!("Failed to enable raw mode for keyboard input: {}", e);
                 return;
             }
-            
+
             info!("Raw mode enabled - keyboard handler active");
-            
+
             loop {
                 // Check if we should stop
                 if cancellation_token.is_cancelled() {
@@ -58,31 +58,35 @@ impl KeyboardInputHandler {
                                 match key_event.code {
                                     KeyCode::Char(' ') => {
                                         info!("Space bar pressed - triggering motion event");
-                                        
+
                                         // Publish a motion detected event
                                         let motion_event = DoorcamEvent::MotionDetected {
                                             contour_area: 5000.0, // Simulated large motion area
                                             timestamp: SystemTime::now(),
                                         };
-                                        
+
                                         let event_bus_clone = Arc::clone(&event_bus);
                                         runtime_handle.spawn(async move {
-                                            if let Err(e) = event_bus_clone.publish(motion_event).await {
+                                            if let Err(e) =
+                                                event_bus_clone.publish(motion_event).await
+                                            {
                                                 warn!("Failed to publish motion event: {}", e);
                                             }
                                         });
                                     }
                                     KeyCode::Char('q') | KeyCode::Esc => {
                                         info!("Quit key pressed - requesting shutdown");
-                                        
+
                                         let shutdown_event = DoorcamEvent::ShutdownRequested {
                                             timestamp: SystemTime::now(),
                                             reason: "User requested via keyboard".to_string(),
                                         };
-                                        
+
                                         let event_bus_clone = Arc::clone(&event_bus);
                                         runtime_handle.spawn(async move {
-                                            if let Err(e) = event_bus_clone.publish(shutdown_event).await {
+                                            if let Err(e) =
+                                                event_bus_clone.publish(shutdown_event).await
+                                            {
                                                 warn!("Failed to publish shutdown event: {}", e);
                                             }
                                         });
@@ -104,14 +108,14 @@ impl KeyboardInputHandler {
                     }
                 }
             }
-            
+
             // Disable raw mode when exiting
             if let Err(e) = disable_raw_mode() {
                 error!("Failed to disable raw mode: {}", e);
             } else {
                 debug!("Raw mode disabled");
             }
-            
+
             debug!("Keyboard input handler task exited");
         });
 
@@ -122,13 +126,13 @@ impl KeyboardInputHandler {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping keyboard input handler");
         self.cancellation_token.cancel();
-        
+
         // Give the task a moment to clean up and disable raw mode
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         // Ensure raw mode is disabled even if the task didn't clean up properly
         let _ = disable_raw_mode();
-        
+
         Ok(())
     }
 }
@@ -141,7 +145,7 @@ mod tests {
     async fn test_keyboard_handler_creation() {
         let event_bus = Arc::new(EventBus::new(100));
         let handler = KeyboardInputHandler::new(event_bus);
-        
+
         // Just verify we can create the handler
         assert!(!handler.cancellation_token.is_cancelled());
     }
@@ -150,7 +154,7 @@ mod tests {
     async fn test_keyboard_handler_stop() {
         let event_bus = Arc::new(EventBus::new(100));
         let handler = KeyboardInputHandler::new(event_bus);
-        
+
         handler.stop().await.unwrap();
         assert!(handler.cancellation_token.is_cancelled());
     }

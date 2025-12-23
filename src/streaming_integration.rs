@@ -1,9 +1,9 @@
 use crate::{
     config::StreamConfig,
+    error::Result,
     events::{DoorcamEvent, EventBus},
     ring_buffer::RingBuffer,
     streaming::StreamServer,
-    error::Result,
 };
 use std::sync::Arc;
 use tokio::time::{interval, Duration, Instant};
@@ -94,7 +94,7 @@ impl StreamingIntegration {
                 Arc::clone(&self.event_bus),
                 self.target_fps,
             );
-            
+
             tokio::spawn(async move {
                 if let Err(e) = server.start().await {
                     error!("Stream server error: {}", e);
@@ -137,7 +137,7 @@ impl StreamingIntegration {
     async fn start_frame_sync_monitor(&self) -> Result<tokio::task::JoinHandle<()>> {
         let ring_buffer = Arc::clone(&self.ring_buffer);
         let event_bus = Arc::clone(&self.event_bus);
-        
+
         let handle = tokio::spawn(async move {
             let mut event_receiver = event_bus.subscribe();
             let mut last_frame_id = 0u64;
@@ -165,7 +165,7 @@ impl StreamingIntegration {
                             }
                         }
                     }
-                    
+
                     event_result = event_receiver.recv() => {
                         match event_result {
                             Ok(DoorcamEvent::FrameReady { frame_id, .. }) => {
@@ -194,7 +194,7 @@ impl StreamingIntegration {
     async fn start_stats_reporter(&self) -> Result<tokio::task::JoinHandle<()>> {
         let event_bus = Arc::clone(&self.event_bus);
         let ring_buffer = Arc::clone(&self.ring_buffer);
-        
+
         let handle = tokio::spawn(async move {
             let mut stats_interval = interval(Duration::from_secs(30));
             let mut last_stats_time = Instant::now();
@@ -209,7 +209,7 @@ impl StreamingIntegration {
                 let ring_stats = ring_buffer.stats();
                 let current_time = Instant::now();
                 let elapsed = current_time.duration_since(last_stats_time).as_secs_f64();
-                
+
                 let frames_processed = ring_stats.frames_pushed - last_frame_count;
                 let fps = if elapsed > 0.0 {
                     frames_processed as f64 / elapsed
@@ -219,9 +219,7 @@ impl StreamingIntegration {
 
                 info!(
                     "Streaming stats: {:.1} FPS, {}% buffer utilization, {} total frames",
-                    fps,
-                    ring_stats.utilization_percent,
-                    ring_stats.frames_pushed
+                    fps, ring_stats.utilization_percent, ring_stats.frames_pushed
                 );
 
                 // Update for next iteration
@@ -229,15 +227,15 @@ impl StreamingIntegration {
                 last_frame_count = ring_stats.frames_pushed;
 
                 // Publish statistics event
-                let _ = event_bus.publish(DoorcamEvent::SystemError {
-                    component: "streaming_stats".to_string(),
-                    error: format!(
-                        "FPS: {:.1}, Buffer: {}%, Frames: {}",
-                        fps,
-                        ring_stats.utilization_percent,
-                        ring_stats.frames_pushed
-                    ),
-                }).await;
+                let _ = event_bus
+                    .publish(DoorcamEvent::SystemError {
+                        component: "streaming_stats".to_string(),
+                        error: format!(
+                            "FPS: {:.1}, Buffer: {}%, Frames: {}",
+                            fps, ring_stats.utilization_percent, ring_stats.frames_pushed
+                        ),
+                    })
+                    .await;
             }
         });
 
@@ -294,12 +292,15 @@ impl FrameRateAdapter {
             0.0
         };
 
-        self.current_fps = (self.current_fps * (1.0 + target_adjustment))
-            .clamp(self.min_fps, self.max_fps);
+        self.current_fps =
+            (self.current_fps * (1.0 + target_adjustment)).clamp(self.min_fps, self.max_fps);
 
         debug!(
             "Frame rate adaptation: target={:.1}, current={:.1}, actual={:.1}, buffer={:.1}%",
-            self.target_fps, self.current_fps, actual_fps, buffer_utilization * 100.0
+            self.target_fps,
+            self.current_fps,
+            actual_fps,
+            buffer_utilization * 100.0
         );
     }
 
@@ -337,12 +338,10 @@ impl QualityAdapter {
     pub fn update(&mut self, bandwidth_utilization: f64, frame_drop_rate: f64) {
         if bandwidth_utilization > 0.9 || frame_drop_rate > 0.1 {
             // High bandwidth usage or frame drops, reduce quality
-            self.current_quality = (self.current_quality.saturating_sub(5))
-                .max(self.min_quality);
+            self.current_quality = (self.current_quality.saturating_sub(5)).max(self.min_quality);
         } else if bandwidth_utilization < 0.5 && frame_drop_rate < 0.01 {
             // Low bandwidth usage and no drops, increase quality
-            self.current_quality = (self.current_quality.saturating_add(2))
-                .min(self.max_quality);
+            self.current_quality = (self.current_quality.saturating_add(2)).min(self.max_quality);
         }
 
         debug!(
@@ -363,10 +362,7 @@ impl QualityAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        events::EventBus,
-        ring_buffer::RingBuffer,
-    };
+    use crate::{events::EventBus, ring_buffer::RingBuffer};
     use std::time::Duration;
 
     #[tokio::test]
@@ -386,16 +382,16 @@ mod tests {
     #[test]
     fn test_streaming_stats() {
         let mut stats = StreamingStats::default();
-        
+
         // Update with frame data
         stats.update_frame_stats(1024);
         assert_eq!(stats.frames_processed, 1);
         assert_eq!(stats.bytes_streamed, 1024);
-        
+
         // Record dropped frame
         stats.record_dropped_frame();
         assert_eq!(stats.frames_dropped, 1);
-        
+
         // Check efficiency
         assert_eq!(stats.efficiency(), 0.5); // 1 processed / 2 total
     }
@@ -403,11 +399,11 @@ mod tests {
     #[test]
     fn test_frame_rate_adapter() {
         let mut adapter = FrameRateAdapter::new(30.0);
-        
+
         // High buffer utilization should reduce FPS
         adapter.update(25.0, 0.9);
         assert!(adapter.current_fps() < 30.0);
-        
+
         // Low buffer utilization should increase FPS
         adapter.update(15.0, 0.2);
         // FPS should increase from the reduced value
@@ -416,11 +412,11 @@ mod tests {
     #[test]
     fn test_quality_adapter() {
         let mut adapter = QualityAdapter::new(80);
-        
+
         // High bandwidth utilization should reduce quality
         adapter.update(0.95, 0.15);
         assert!(adapter.current_quality() < 80);
-        
+
         // Low bandwidth utilization should increase quality
         adapter.update(0.3, 0.005);
         // Quality should increase from the reduced value
@@ -437,7 +433,7 @@ mod tests {
         let event_bus = Arc::new(EventBus::new(10));
 
         let integration = StreamingIntegration::new(config, ring_buffer, event_bus, 30).unwrap();
-        
+
         // Should not be healthy initially (no frames processed)
         assert!(!integration.is_healthy());
     }
