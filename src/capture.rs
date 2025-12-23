@@ -7,6 +7,7 @@ use crate::{
     wal::{delete_wal, find_wal_files, WalReader, WalWriter},
 };
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -77,6 +78,19 @@ impl CaptureEventTask {
 
     fn cancel(&self) {
         self.cancellation_token.cancel();
+    }
+}
+
+fn resolve_timestamp_timezone(tz_name: &str) -> Tz {
+    match tz_name.parse::<Tz>() {
+        Ok(tz) => tz,
+        Err(_) => {
+            warn!(
+                "Invalid timestamp timezone '{}', falling back to UTC",
+                tz_name
+            );
+            chrono_tz::UTC
+        }
     }
 }
 
@@ -228,8 +242,9 @@ impl VideoCapture {
         }
 
         // No active capture to extend, create a new one
-        // Use timestamp as event ID for easy identification
-        let timestamp = DateTime::<Utc>::from(motion_time);
+        // Use timestamp as event ID for easy identification (localized to configured timezone)
+        let timezone = resolve_timestamp_timezone(&self.config.timestamp_timezone);
+        let timestamp = DateTime::<Utc>::from(motion_time).with_timezone(&timezone);
         let event_id = timestamp.format("%Y%m%d_%H%M%S_%3f").to_string();
 
         info!(
@@ -560,6 +575,8 @@ impl VideoCapture {
         capture_dir: &Path,
         config: &CaptureConfig,
     ) -> Result<()> {
+        let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
+
         // Create frames subdirectory
         let frames_dir = capture_dir.join("frames");
         fs::create_dir_all(&frames_dir).await.map_err(|e| {
@@ -570,7 +587,7 @@ impl VideoCapture {
         })?;
 
         for frame in frames {
-            let timestamp = DateTime::<Utc>::from(frame.timestamp);
+            let timestamp = DateTime::<Utc>::from(frame.timestamp).with_timezone(&timezone);
             let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
             let file_path = frames_dir.join(&filename);
 
@@ -855,9 +872,10 @@ impl VideoCapture {
                 })?
                 .to_rgba8();
 
-            // Format timestamp
-            let datetime = DateTime::<Utc>::from(timestamp);
-            let timestamp_text = datetime.format("%Y-%m-%d %H:%M:%S%.3f UTC").to_string();
+            // Format timestamp in configured timezone
+            let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
+            let datetime = DateTime::<Utc>::from(timestamp).with_timezone(&timezone);
+            let timestamp_text = datetime.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string();
 
             // Load font from system path specified in config
             let font_data = fs::read(&config.timestamp_font_path).map_err(|e| {
@@ -1122,6 +1140,7 @@ mod tests {
             timestamp_overlay: true,
             timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
             timestamp_font_size: 24.0,
+            timestamp_timezone: "UTC".to_string(),
             video_encoding: false,
             keep_images: true,
             save_metadata: true,

@@ -38,6 +38,7 @@ parking_lot = "0.12"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
 
 # HTTP server
 axum = { version = "0.7", optional = true }

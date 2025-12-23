@@ -484,6 +484,7 @@ mod tests {
             timestamp_overlay: true,
             timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
             timestamp_font_size: 24.0,
+            timestamp_timezone: "UTC".to_string(),
             video_encoding: false,
             keep_images: true,
             save_metadata: true,

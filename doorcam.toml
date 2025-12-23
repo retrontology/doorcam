@@ -50,6 +50,9 @@ timestamp_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 # Font size for timestamp overlay (in points)
 timestamp_font_size = 24.0
 
+# Timezone for timestamp overlay (IANA name, e.g., "America/New_York")
+timestamp_timezone = "UTC"
+
 # Enable video encoding
 video_encoding = true
 

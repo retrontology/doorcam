@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use chrono_tz::Tz;
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -84,6 +85,10 @@ pub struct CaptureConfig {
     /// Font size for timestamp overlay
     #[serde(default = "default_timestamp_font_size")]
     pub timestamp_font_size: f32,
+
+    /// Timezone to use for timestamp overlays (IANA identifier, e.g., "UTC" or "America/New_York")
+    #[serde(default = "default_timestamp_timezone")]
+    pub timestamp_timezone: String,
 
     /// Enable video encoding
     #[serde(default = "default_video_encoding")]
@@ -192,6 +197,7 @@ impl DoorcamConfig {
                 "capture.timestamp_font_size",
                 default_timestamp_font_size() as f64,
             )?
+            .set_default("capture.timestamp_timezone", default_timestamp_timezone())?
             .set_default("capture.video_encoding", default_video_encoding())?
             .set_default("capture.keep_images", default_keep_images())?
             .set_default("capture.save_metadata", default_save_metadata())?
@@ -262,6 +268,14 @@ impl DoorcamConfig {
             ));
         }
 
+        // Validate timezone string for timestamp overlays
+        if self.capture.timestamp_timezone.parse::<Tz>().is_err() {
+            return Err(ConfigError::Message(format!(
+                "Invalid capture.timestamp_timezone value: '{}'",
+                self.capture.timestamp_timezone
+            )));
+        }
+
         // Validate system settings
         Ok(())
     }
@@ -291,6 +305,7 @@ impl Default for DoorcamConfig {
                 timestamp_overlay: default_timestamp_overlay(),
                 timestamp_font_path: default_timestamp_font_path(),
                 timestamp_font_size: default_timestamp_font_size(),
+                timestamp_timezone: default_timestamp_timezone(),
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
                 save_metadata: default_save_metadata(),
@@ -362,6 +377,9 @@ fn default_timestamp_font_path() -> String {
 fn default_timestamp_font_size() -> f32 {
     24.0
 }
+fn default_timestamp_timezone() -> String {
+    "UTC".to_string()
+}
 fn default_video_encoding() -> bool {
     true
 }
@@ -431,6 +449,7 @@ mod tests {
                 timestamp_overlay: default_timestamp_overlay(),
                 timestamp_font_path: default_timestamp_font_path(),
                 timestamp_font_size: default_timestamp_font_size(),
+                timestamp_timezone: default_timestamp_timezone(),
                 video_encoding: default_video_encoding(),
                 keep_images: default_keep_images(),
                 save_metadata: default_save_metadata(),
@@ -497,6 +516,7 @@ mod tests {
                 timestamp_overlay: true,
                 timestamp_font_path: default_timestamp_font_path(),
                 timestamp_font_size: default_timestamp_font_size(),
+                timestamp_timezone: default_timestamp_timezone(),
                 video_encoding: false,
                 keep_images: false,
                 save_metadata: false,
