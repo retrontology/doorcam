@@ -189,7 +189,6 @@ async fn mjpeg_stream_handler(
         .header(header::CONTENT_TYPE, "multipart/x-mixed-replace; boundary=FRAME")
         .header(header::CACHE_CONTROL, "no-cache, private")
         .header(header::PRAGMA, "no-cache")
-        .header(header::CONNECTION, "close")
         .header("Access-Control-Allow-Origin", "*")
         .header("Access-Control-Allow-Methods", "GET")
         .body(axum::body::Body::from_stream(stream))
