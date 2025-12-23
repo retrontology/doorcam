@@ -107,7 +107,7 @@ impl MotionAnalyzerIntegration {
 
                             // Analyze the frame with timeout to prevent blocking shutdown
                             let analysis_result = tokio::time::timeout(
-                                tokio::time::Duration::from_millis(2000), // Increased timeout for hardware decoding
+                                tokio::time::Duration::from_millis(2000), // Generous timeout to avoid blocking shutdown
                                 async {
                                     let mut analyzer_guard = analyzer.write().await;
                                     analyzer_guard.analyze_frame(&frame, &event_bus).await

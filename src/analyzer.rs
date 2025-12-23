@@ -110,18 +110,8 @@ impl MotionAnalyzer {
         target_height: u32,
     ) -> Result<()> {
         info!(
-            "Initializing GStreamer pipeline for motion analysis at {}x{} (scale 1/{})",
+            "Initializing software GStreamer pipeline for motion analysis at {}x{} (scale 1/{})",
             target_width, target_height, self.config.jpeg_decode_scale
-        );
-
-        // Define hardware pipeline with direct downscaling if supported
-        let hw_pipeline_desc = format!(
-            "appsrc name=src format=time is-live=true caps=image/jpeg ! \
-             v4l2jpegdec ! \
-             v4l2convert ! \
-             video/x-raw,format=GRAY8,width={},height={} ! \
-             appsink name=sink sync=false max-buffers=1 drop=true",
-            target_width, target_height
         );
 
         // Software pipeline - decode JPEG and scale down for motion analysis
@@ -138,29 +128,16 @@ impl MotionAnalyzer {
             target_width, target_height
         );
 
-        // Attempt to use hardware acceleration and fall back to software if unavailable
-        let pipeline = match gstreamer::parse::launch(&hw_pipeline_desc) {
-            Ok(pipeline) => {
-                info!("Hardware-accelerated GStreamer pipeline created successfully");
-                pipeline
-            }
-            Err(e) => {
-                warn!(
-                    "Hardware acceleration not available ({}), falling back to software pipeline",
-                    e
-                );
-                debug!(
-                    "Creating software motion analysis pipeline: {}",
-                    sw_pipeline_desc
-                );
+        debug!(
+            "Creating software motion analysis pipeline: {}",
+            sw_pipeline_desc
+        );
 
-                gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| {
-                    AnalyzerError::FrameProcessing {
-                        details: format!("Failed to create software pipeline: {}", e),
-                    }
-                })?
+        let pipeline = gstreamer::parse::launch(&sw_pipeline_desc).map_err(|e| {
+            AnalyzerError::FrameProcessing {
+                details: format!("Failed to create software pipeline: {}", e),
             }
-        };
+        })?;
 
         let pipeline =
             pipeline
