@@ -22,8 +22,7 @@ pub use analyzer::MotionAnalyzer;
 pub use analyzer::{
     MotionAnalysisMetrics, MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder,
 };
-pub use app::{app_orchestration, keyboard_input, orchestration};
-pub use app_orchestration::{ComponentState, DoorcamOrchestrator, ShutdownReason};
+pub use app::{keyboard_input, ComponentState, DoorcamOrchestrator, ShutdownReason};
 pub use camera::{
     calculate_ring_buffer_capacity, CameraRingBufferIntegration,
     CameraRingBufferIntegrationBuilder, HealthCheckResult as CameraHealthCheckResult,

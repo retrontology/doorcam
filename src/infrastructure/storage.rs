@@ -569,29 +569,10 @@ impl EventStorage {
                 }
             }
         } else {
-            // Fallback: check old location in event directory for backward compatibility
-            let old_metadata_path = event_dir.join("metadata.json");
-            if old_metadata_path.exists() {
-                match self.load_event_type_from_metadata(&old_metadata_path).await {
-                    Ok(event_type) => event_type,
-                    Err(e) => {
-                        warn!(
-                            "Failed to load metadata for {}: {}, using default",
-                            dir_name, e
-                        );
-                        StoredEventType::MotionCapture {
-                            motion_area: 0.0,
-                            preroll_frames: 0,
-                            postroll_frames: 0,
-                        }
-                    }
-                }
-            } else {
-                StoredEventType::MotionCapture {
-                    motion_area: 0.0,
-                    preroll_frames: 0,
-                    postroll_frames: 0,
-                }
+            StoredEventType::MotionCapture {
+                motion_area: 0.0,
+                preroll_frames: 0,
+                postroll_frames: 0,
             }
         };
 
