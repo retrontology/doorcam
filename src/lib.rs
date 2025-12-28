@@ -20,7 +20,7 @@ pub mod app;
 // Re-export common types at the crate root
 pub use analyzer::MotionAnalyzer;
 pub use analyzer::{
-    MotionAnalysisMetrics, MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder,
+    MotionAnalysisMetrics, MotionAnalyzerOrchestrator, MotionAnalyzerOrchestratorBuilder,
 };
 pub use app::{keyboard_input, ComponentState, DoorcamOrchestrator, ShutdownReason};
 pub use camera::{

@@ -95,8 +95,8 @@ impl DoorcamOrchestrator {
                 }
             }
             "analyzer" => {
-                if let Some(analyzer_integration) = &self.analyzer_integration {
-                    let mut analyzer = analyzer_integration.lock().await;
+                if let Some(analyzer_orchestrator) = &self.analyzer_orchestrator {
+                    let mut analyzer = analyzer_orchestrator.lock().await;
                     match timeout(Duration::from_secs(10), analyzer.stop()).await {
                         Ok(Ok(())) => {
                             self.set_component_state(component, ComponentState::Stopped)

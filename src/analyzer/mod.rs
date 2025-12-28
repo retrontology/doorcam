@@ -1,7 +1,7 @@
-mod integration;
+mod orchestrator;
 mod motion;
 
-pub use integration::{
-    MotionAnalysisMetrics, MotionAnalyzerIntegration, MotionAnalyzerIntegrationBuilder,
+pub use orchestrator::{
+    MotionAnalysisMetrics, MotionAnalyzerOrchestrator, MotionAnalyzerOrchestratorBuilder,
 };
 pub use motion::MotionAnalyzer;

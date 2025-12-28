@@ -17,8 +17,8 @@ pub struct MotionAnalysisMetrics {
     pub frames_processed: u64,
 }
 
-/// Integration component that connects the motion analyzer with the ring buffer and event system
-pub struct MotionAnalyzerIntegration {
+/// Orchestrator that connects the motion analyzer with the ring buffer and event system
+pub struct MotionAnalyzerOrchestrator {
     analyzer: Arc<RwLock<MotionAnalyzer>>,
     ring_buffer: Arc<RingBuffer>,
     event_bus: Arc<EventBus>,
@@ -28,14 +28,14 @@ pub struct MotionAnalyzerIntegration {
     last_analysis_time: Arc<tokio::sync::RwLock<std::time::Instant>>,
 }
 
-impl MotionAnalyzerIntegration {
-    /// Create a new motion analyzer integration
+impl MotionAnalyzerOrchestrator {
+    /// Create a new motion analyzer orchestrator
     pub async fn new(
         config: AnalyzerConfig,
         ring_buffer: Arc<RingBuffer>,
         event_bus: Arc<EventBus>,
     ) -> Result<Self> {
-        info!("Creating motion analyzer integration");
+        info!("Creating motion analyzer orchestrator");
 
         let analyzer = MotionAnalyzer::new(config).await?;
 
@@ -50,15 +50,15 @@ impl MotionAnalyzerIntegration {
         })
     }
 
-    /// Start the motion analysis integration
+    /// Start the motion analysis orchestrator
     pub async fn start(&mut self) -> Result<()> {
         let mut is_running = self.is_running.write().await;
         if *is_running {
-            warn!("Motion analyzer integration is already running");
+            warn!("Motion analyzer orchestrator is already running");
             return Ok(());
         }
 
-        info!("Starting motion analyzer integration");
+        info!("Starting motion analyzer orchestrator");
 
         let analyzer = Arc::clone(&self.analyzer);
         let ring_buffer = Arc::clone(&self.ring_buffer);
@@ -133,7 +133,7 @@ impl MotionAnalyzerIntegration {
 
                                     if let Err(publish_err) = event_bus
                                         .publish(DoorcamEvent::SystemError {
-                                            component: "motion_analyzer_integration".to_string(),
+                                            component: "motion_analyzer_orchestrator".to_string(),
                                             error: e.to_string(),
                                         })
                                         .await
@@ -185,7 +185,7 @@ impl MotionAnalyzerIntegration {
                                 }
                                 DoorcamEvent::SystemError { component, error } => {
                                     error!(
-                                        "System error from {} received by analyzer integration: {}",
+                                        "System error from {} received by analyzer orchestrator: {}",
                                         component, error
                                     );
                                 }
@@ -210,15 +210,15 @@ impl MotionAnalyzerIntegration {
         Ok(())
     }
 
-    /// Stop the motion analysis integration
+    /// Stop the motion analysis orchestrator
     pub async fn stop(&mut self) -> Result<()> {
         let mut is_running = self.is_running.write().await;
         if !*is_running {
-            warn!("Motion analyzer integration is not running");
+            warn!("Motion analyzer orchestrator is not running");
             return Ok(());
         }
 
-        info!("Stopping motion analyzer integration");
+        info!("Stopping motion analyzer orchestrator");
         *is_running = false;
 
         if let Some(task) = self.analysis_task.take() {
@@ -233,7 +233,7 @@ impl MotionAnalyzerIntegration {
             }
         }
 
-        info!("Motion analyzer integration stopped");
+        info!("Motion analyzer orchestrator stopped");
         Ok(())
     }
 
@@ -253,14 +253,14 @@ impl MotionAnalyzerIntegration {
     }
 }
 
-/// Builder for MotionAnalyzerIntegration
-pub struct MotionAnalyzerIntegrationBuilder {
+/// Builder for MotionAnalyzerOrchestrator
+pub struct MotionAnalyzerOrchestratorBuilder {
     config: Option<AnalyzerConfig>,
     ring_buffer: Option<Arc<RingBuffer>>,
     event_bus: Option<Arc<EventBus>>,
 }
 
-impl MotionAnalyzerIntegrationBuilder {
+impl MotionAnalyzerOrchestratorBuilder {
     /// Create a new builder
     pub fn new() -> Self {
         Self {
@@ -288,26 +288,26 @@ impl MotionAnalyzerIntegrationBuilder {
         self
     }
 
-    /// Build the integration
-    pub async fn build(self) -> Result<MotionAnalyzerIntegration> {
+    /// Build the orchestrator
+    pub async fn build(self) -> Result<MotionAnalyzerOrchestrator> {
         let config = self.config.ok_or_else(|| {
-            DoorcamError::component("motion_analyzer_integration_builder", "Config is required")
+            DoorcamError::component("motion_analyzer_orchestrator_builder", "Config is required")
         })?;
 
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
             DoorcamError::component(
-                "motion_analyzer_integration_builder",
+                "motion_analyzer_orchestrator_builder",
                 "Ring buffer is required",
             )
         })?;
 
         let event_bus = self.event_bus.ok_or_else(|| {
             DoorcamError::component(
-                "motion_analyzer_integration_builder",
+                "motion_analyzer_orchestrator_builder",
                 "Event bus is required",
             )
         })?;
 
-        MotionAnalyzerIntegration::new(config, ring_buffer, event_bus).await
+        MotionAnalyzerOrchestrator::new(config, ring_buffer, event_bus).await
     }
 }

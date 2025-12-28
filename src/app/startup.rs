@@ -93,20 +93,20 @@ impl DoorcamOrchestrator {
             );
         }
 
-        // Start analyzer integration
-        if let Some(analyzer_integration) = &self.analyzer_integration {
+        // Start analyzer orchestrator
+        if let Some(analyzer_orchestrator) = &self.analyzer_orchestrator {
             self.set_component_state("analyzer", ComponentState::Starting)
                 .await;
 
-            let mut analyzer = analyzer_integration.lock().await;
+            let mut analyzer = analyzer_orchestrator.lock().await;
             analyzer.start().await.map_err(|e| {
-                error!("Failed to start analyzer integration: {}", e);
+                error!("Failed to start analyzer orchestrator: {}", e);
                 e
             })?;
 
             self.set_component_state("analyzer", ComponentState::Running)
                 .await;
-            info!("Analyzer integration started successfully");
+            info!("Analyzer orchestrator started successfully");
         }
 
         // Start display integration

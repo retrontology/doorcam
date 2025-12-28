@@ -1,5 +1,5 @@
 use super::types::ComponentState;
-use crate::analyzer::MotionAnalyzerIntegration;
+use crate::analyzer::MotionAnalyzerOrchestrator;
 use crate::camera::{calculate_ring_buffer_capacity, CameraRingBufferIntegration};
 use crate::capture::VideoCaptureIntegration;
 use crate::config::DoorcamConfig;
@@ -24,7 +24,7 @@ pub struct DoorcamOrchestrator {
 
     // Components
     pub(super) camera_integration: Option<CameraRingBufferIntegration>,
-    pub(super) analyzer_integration: Option<Arc<Mutex<MotionAnalyzerIntegration>>>,
+    pub(super) analyzer_orchestrator: Option<Arc<Mutex<MotionAnalyzerOrchestrator>>>,
     pub(super) display_integration: Option<DisplayIntegration>,
     pub(super) capture_integration: Option<VideoCaptureIntegration>,
     pub(super) storage_integration: Option<EventStorageIntegration>,
@@ -61,8 +61,8 @@ impl DoorcamOrchestrator {
             Arc::clone(&ring_buffer)
         };
 
-        let analyzer_integration = Some(Arc::new(Mutex::new(
-            MotionAnalyzerIntegration::new(
+        let analyzer_orchestrator = Some(Arc::new(Mutex::new(
+            MotionAnalyzerOrchestrator::new(
                 config.analyzer.clone(),
                 camera_ring_buffer,
                 Arc::clone(&event_bus),
@@ -112,7 +112,7 @@ impl DoorcamOrchestrator {
             event_bus,
             ring_buffer,
             camera_integration,
-            analyzer_integration,
+            analyzer_orchestrator,
             display_integration,
             capture_integration,
             storage_integration,
