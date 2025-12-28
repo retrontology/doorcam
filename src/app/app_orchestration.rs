@@ -1,16 +1,13 @@
-use crate::analyzer_integration::MotionAnalyzerIntegration;
-use crate::capture_integration::VideoCaptureIntegration;
+use crate::analyzer::MotionAnalyzerIntegration;
+use crate::camera::{calculate_ring_buffer_capacity, CameraRingBufferIntegration};
+use crate::capture::VideoCaptureIntegration;
 use crate::config::DoorcamConfig;
-use crate::display_integration::DisplayIntegration;
+use crate::display::DisplayIntegration;
 use crate::error::{DoorcamError, Result};
 use crate::events::EventBus;
-use crate::integration::calculate_ring_buffer_capacity;
-use crate::integration::CameraRingBufferIntegration;
 use crate::keyboard_input::KeyboardInputHandler;
 use crate::ring_buffer::RingBuffer;
-use crate::storage_integration::EventStorageIntegration;
-
-#[cfg(feature = "streaming")]
+use crate::storage::EventStorageIntegration;
 use crate::streaming::StreamServer;
 
 use std::collections::HashMap;
@@ -55,7 +52,6 @@ pub struct DoorcamOrchestrator {
     storage_integration: Option<EventStorageIntegration>,
     keyboard_handler: Option<KeyboardInputHandler>,
     keyboard_enabled: bool,
-    #[cfg(feature = "streaming")]
     stream_server: Option<StreamServer>,
 
     // Lifecycle management
@@ -123,7 +119,6 @@ impl DoorcamOrchestrator {
                 .build()?,
         );
 
-        #[cfg(feature = "streaming")]
         let stream_server = Some(StreamServer::new(
             config.stream.clone(),
             Arc::clone(&ring_buffer),
@@ -145,7 +140,6 @@ impl DoorcamOrchestrator {
             storage_integration,
             keyboard_handler,
             keyboard_enabled: false, // Disabled by default, enable via set_keyboard_enabled()
-            #[cfg(feature = "streaming")]
             stream_server,
             component_states: Arc::new(Mutex::new(HashMap::new())),
             shutdown_sender: Some(shutdown_sender),
@@ -176,7 +170,6 @@ impl DoorcamOrchestrator {
             states.insert("keyboard".to_string(), ComponentState::Stopped);
         }
 
-        #[cfg(feature = "streaming")]
         states.insert("streaming".to_string(), ComponentState::Stopped);
 
         drop(states);
@@ -213,8 +206,7 @@ impl DoorcamOrchestrator {
             info!("Camera integration started successfully");
         }
 
-        // Start streaming server if enabled
-        #[cfg(feature = "streaming")]
+        // Start streaming server if configured
         if let Some(_stream_server) = &self.stream_server {
             self.set_component_state("streaming", ComponentState::Starting)
                 .await;
@@ -424,7 +416,6 @@ impl DoorcamOrchestrator {
             }
         }
 
-        #[cfg(feature = "streaming")]
         if let Err(e) = self.stop_component("streaming").await {
             error!("Error stopping streaming: {}", e);
             exit_code = 1;

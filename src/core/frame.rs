@@ -1,4 +1,3 @@
-#[cfg(feature = "motion_analysis")]
 use image::codecs::jpeg::JpegEncoder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -240,52 +239,39 @@ impl FrameProcessor {
         frame: &FrameData,
         rotation: Rotation,
     ) -> Result<Arc<Vec<u8>>, crate::error::DoorcamError> {
-        #[cfg(feature = "motion_analysis")]
-        {
-            // For MJPEG, decode, rotate, and re-encode. For other formats, no-op for now.
-            match frame.format {
-                FrameFormat::Mjpeg => {
-                    let img = image::load_from_memory(&frame.data).map_err(|e| {
-                        crate::error::ProcessingError::Rotation {
-                            details: format!("JPEG decode failed: {}", e),
-                        }
-                    })?;
+        // For MJPEG, decode, rotate, and re-encode. For other formats, no-op for now.
+        match frame.format {
+            FrameFormat::Mjpeg => {
+                let img = image::load_from_memory(&frame.data).map_err(|e| {
+                    crate::error::ProcessingError::Rotation {
+                        details: format!("JPEG decode failed: {}", e),
+                    }
+                })?;
 
-                    let rotated = match rotation {
-                        Rotation::Rotate90 => img.rotate90(),
-                        Rotation::Rotate180 => img.rotate180(),
-                        Rotation::Rotate270 => img.rotate270(),
-                    };
+                let rotated = match rotation {
+                    Rotation::Rotate90 => img.rotate90(),
+                    Rotation::Rotate180 => img.rotate180(),
+                    Rotation::Rotate270 => img.rotate270(),
+                };
 
-                    let mut buf = Vec::new();
-                    let mut encoder = JpegEncoder::new_with_quality(&mut buf, 90);
-                    encoder.encode_image(&rotated).map_err(|e| {
-                        crate::error::ProcessingError::JpegEncoding {
-                            details: e.to_string(),
-                        }
-                    })?;
+                let mut buf = Vec::new();
+                let mut encoder = JpegEncoder::new_with_quality(&mut buf, 90);
+                encoder.encode_image(&rotated).map_err(|e| {
+                    crate::error::ProcessingError::JpegEncoding {
+                        details: e.to_string(),
+                    }
+                })?;
 
-                    Ok(Arc::new(buf))
-                }
-                _ => {
-                    tracing::debug!(
-                        "Rotation {:?} requested for non-MJPEG frame {} - returning original",
-                        rotation,
-                        frame.id
-                    );
-                    Ok(Arc::clone(&frame.data))
-                }
+                Ok(Arc::new(buf))
             }
-        }
-
-        #[cfg(not(feature = "motion_analysis"))]
-        {
-            tracing::warn!(
-                "Rotation {:?} requested for frame {} but motion_analysis feature is disabled; returning original bytes",
-                rotation,
-                frame.id
-            );
-            Ok(Arc::clone(&frame.data))
+            _ => {
+                tracing::debug!(
+                    "Rotation {:?} requested for non-MJPEG frame {} - returning original",
+                    rotation,
+                    frame.id
+                );
+                Ok(Arc::clone(&frame.data))
+            }
         }
     }
 

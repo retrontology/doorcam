@@ -86,6 +86,281 @@ pub struct CleanupStatus {
     pub total_events: usize,
 }
 
+/// Integration wrapper for EventStorage with additional management capabilities
+pub struct EventStorageIntegration {
+    storage: Arc<EventStorage>,
+    running: Arc<RwLock<bool>>,
+    stats: Arc<RwLock<StorageIntegrationStats>>,
+}
+
+/// Statistics for the storage integration
+#[derive(Debug, Clone, Default)]
+pub struct StorageIntegrationStats {
+    pub start_time: Option<SystemTime>,
+    pub total_cleanups: u64,
+    pub total_events_deleted: u64,
+    pub total_bytes_freed: u64,
+    pub last_cleanup_result: Option<CleanupResult>,
+    pub cleanup_errors: u64,
+}
+
+/// Combined storage statistics
+#[derive(Debug, Clone)]
+pub struct CombinedStorageStats {
+    pub storage: StorageStats,
+    pub integration: StorageIntegrationStats,
+}
+
+/// Health status levels
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageHealthStatusLevel {
+    Healthy,
+    Warning,
+    Critical,
+}
+
+/// Health status for storage system
+#[derive(Debug, Clone)]
+pub struct StorageHealthStatus {
+    pub status: StorageHealthStatusLevel,
+    pub issues: Vec<String>,
+    pub uptime: Option<Duration>,
+    pub storage_stats: StorageStats,
+    pub integration_stats: StorageIntegrationStats,
+}
+
+/// Builder for EventStorageIntegration
+pub struct EventStorageIntegrationBuilder {
+    capture_config: Option<CaptureConfig>,
+    system_config: Option<SystemConfig>,
+    event_bus: Option<Arc<EventBus>>,
+}
+
+impl EventStorageIntegrationBuilder {
+    pub fn new() -> Self {
+        Self {
+            capture_config: None,
+            system_config: None,
+            event_bus: None,
+        }
+    }
+
+    pub fn with_capture_config(mut self, config: CaptureConfig) -> Self {
+        self.capture_config = Some(config);
+        self
+    }
+
+    pub fn with_system_config(mut self, config: SystemConfig) -> Self {
+        self.system_config = Some(config);
+        self
+    }
+
+    pub fn with_event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn build(self) -> Result<EventStorageIntegration> {
+        let capture_config = self.capture_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Capture config is required")
+        })?;
+
+        let system_config = self.system_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "System config is required")
+        })?;
+
+        let event_bus = self.event_bus.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Event bus is required")
+        })?;
+
+        let storage = Arc::new(EventStorage::new(capture_config, system_config, event_bus));
+
+        Ok(EventStorageIntegration {
+            storage,
+            running: Arc::new(RwLock::new(false)),
+            stats: Arc::new(RwLock::new(StorageIntegrationStats::default())),
+        })
+    }
+}
+
+impl Default for EventStorageIntegrationBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EventStorageIntegration {
+    pub fn builder() -> EventStorageIntegrationBuilder {
+        EventStorageIntegrationBuilder::new()
+    }
+
+    pub async fn start(&self) -> Result<()> {
+        {
+            let mut running = self.running.write().await;
+            if *running {
+                return Err(DoorcamError::component(
+                    "storage_integration",
+                    "Already running",
+                ));
+            }
+            *running = true;
+        }
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.start_time = Some(SystemTime::now());
+        }
+
+        info!("Starting event storage integration");
+
+        self.storage.start().await?;
+        self.start_monitoring_task().await;
+
+        info!("Event storage integration started successfully");
+        Ok(())
+    }
+
+    async fn start_monitoring_task(&self) {
+        let storage = Arc::clone(&self.storage);
+        let stats = Arc::clone(&self.stats);
+        let running = Arc::clone(&self.running);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300)); // Every 5 minutes
+
+            loop {
+                interval.tick().await;
+
+                {
+                    let running_guard = running.read().await;
+                    if !*running_guard {
+                        break;
+                    }
+                }
+
+                if let Err(e) = Self::update_monitoring_stats(&storage, &stats).await {
+                    error!("Failed to update monitoring stats: {}", e);
+                }
+            }
+        });
+    }
+
+    async fn update_monitoring_stats(
+        storage: &Arc<EventStorage>,
+        _stats: &Arc<RwLock<StorageIntegrationStats>>,
+    ) -> Result<()> {
+        let storage_stats = storage.get_storage_stats().await;
+
+        debug!(
+            "Storage monitoring: {} events, {} bytes, last cleanup: {:?}",
+            storage_stats.total_events, storage_stats.total_size_bytes, storage_stats.last_cleanup
+        );
+
+        const WARNING_THRESHOLD_GB: u64 = 10 * 1024 * 1024 * 1024;
+        if storage_stats.total_size_bytes > WARNING_THRESHOLD_GB {
+            warn!(
+                "Storage usage is high: {:.2} GB ({} events)",
+                storage_stats.total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                storage_stats.total_events
+            );
+        }
+
+        if let Some(oldest) = storage_stats.oldest_event {
+            if let Ok(age) = oldest.elapsed() {
+                const WARNING_AGE_DAYS: u64 = 30;
+                if age > Duration::from_secs(WARNING_AGE_DAYS * 24 * 3600) {
+                    warn!(
+                        "Oldest event is {} days old, consider checking cleanup configuration",
+                        age.as_secs() / (24 * 3600)
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_manual_cleanup(&self) -> Result<CleanupResult> {
+        info!("Running manual cleanup");
+
+        let start_time = SystemTime::now();
+        let result = self.storage.run_cleanup().await;
+        let duration = start_time.elapsed().unwrap_or_default();
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_cleanups += 1;
+
+            match &result {
+                Ok(cleanup_result) => {
+                    stats.total_events_deleted += cleanup_result.events_deleted as u64;
+                    stats.total_bytes_freed += cleanup_result.bytes_freed;
+                    stats.last_cleanup_result = Some(cleanup_result.clone());
+                    info!(
+                        "Manual cleanup completed: deleted {} events, freed {} bytes in {:?}",
+                        cleanup_result.events_deleted, cleanup_result.bytes_freed, duration
+                    );
+                }
+                Err(e) => {
+                    stats.cleanup_errors += 1;
+                    error!("Manual cleanup failed: {}", e);
+                }
+            }
+        }
+
+        Ok(result?)
+    }
+
+    pub async fn run_cleanup_with_retention(&self, retention_days: u32) -> Result<CleanupResult> {
+        info!(
+            "Running cleanup with custom retention: {} days",
+            retention_days
+        );
+
+        let result = self
+            .storage
+            .run_cleanup_with_retention(retention_days)
+            .await?;
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_cleanups += 1;
+            stats.total_events_deleted += result.events_deleted as u64;
+            stats.total_bytes_freed += result.bytes_freed;
+            stats.last_cleanup_result = Some(result.clone());
+        }
+
+        info!(
+            "Cleanup with retention completed: {} events deleted, {} bytes freed",
+            result.events_deleted, result.bytes_freed
+        );
+
+        Ok(result)
+    }
+
+    pub async fn get_stats(&self) -> StorageIntegrationStats {
+        self.stats.read().await.clone()
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        {
+            let mut running = self.running.write().await;
+            if !*running {
+                warn!("Storage integration already stopped");
+                return Ok(());
+            }
+            *running = false;
+        }
+
+        info!("Stopping storage integration");
+
+        self.storage.stop().await?;
+
+        info!("Storage integration stopped");
+        Ok(())
+    }
+}
+
 impl EventStorage {
     /// Create a new event storage system
     pub fn new(

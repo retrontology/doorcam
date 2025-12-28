@@ -41,14 +41,14 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.8"
 
 # HTTP server
-axum = { version = "0.7", optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", optional = true }
+axum = { version = "0.7" }
+tower = { version = "0.4" }
+tower-http = { version = "0.5" }
 
 # Async streams
-async-stream = { version = "0.3", optional = true }
-futures = { version = "0.3", optional = true }
-bytes = { version = "1.0", optional = true }
+async-stream = { version = "0.3" }
+futures = { version = "0.3" }
+bytes = { version = "1.0" }
 
 # JSON serialization
 serde_json = "1.0"
@@ -64,31 +64,20 @@ tempfile = "3.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # GStreamer for hardware acceleration
-gstreamer = { version = "0.24", optional = true }
-gstreamer-app = { version = "0.24", optional = true }
-gstreamer-video = { version = "0.24", optional = true }
+gstreamer = { version = "0.24" }
+gstreamer-app = { version = "0.24" }
+gstreamer-video = { version = "0.24" }
 # Input device handling (Linux only)
-evdev = { version = "0.12", optional = true }
+evdev = { version = "0.12" }
 
 [dependencies.image]
 version = "0.24"
-optional = true
 
 [dependencies.imageproc]
 version = "0.23"
-optional = true
 
 [dependencies.rusttype]
 version = "0.9"
-optional = true
-
-[features]
-default = ["camera", "motion_analysis", "streaming", "display", "video_encoding"]
-camera = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
-motion_analysis = ["dep:image", "dep:imageproc", "dep:rusttype", "dep:gstreamer", "dep:gstreamer-app"]
-streaming = ["dep:axum", "dep:tower", "dep:tower-http", "dep:async-stream", "dep:futures", "dep:bytes"]
-display = ["dep:evdev", "dep:gstreamer", "dep:gstreamer-app"]
-video_encoding = ["dep:gstreamer", "dep:gstreamer-app"]
 
 [[bin]]
 name = "doorcam"

@@ -1,24 +1,9 @@
 use crate::config::AnalyzerConfig;
-#[cfg(feature = "motion_analysis")]
-use crate::error::AnalyzerError;
-use crate::error::Result;
+use crate::error::{AnalyzerError, Result};
 use crate::events::{DoorcamEvent, EventBus};
-use crate::frame::FrameData;
-#[cfg(feature = "motion_analysis")]
-use crate::frame::FrameFormat;
+use crate::frame::{FrameData, FrameFormat};
 
-use tracing::{debug, error, info, warn};
-
-#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-use gstreamer::prelude::*;
-#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-use gstreamer::Pipeline;
-#[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-use gstreamer_app::{AppSink, AppSrc};
-
-#[cfg(feature = "motion_analysis")]
 use image::{GrayImage, ImageBuffer, Luma, RgbImage};
-#[cfg(feature = "motion_analysis")]
 use imageproc::{
     contrast::threshold,
     distance_transform::Norm,
@@ -26,30 +11,20 @@ use imageproc::{
     morphology::{dilate, erode},
     region_labelling::{connected_components, Connectivity},
 };
-
-/// Simple motion detection state for fallback implementation
-#[cfg(not(feature = "motion_analysis"))]
-struct SimpleMotionState {
-    frame_count: u64,
-    last_motion_time: Option<std::time::SystemTime>,
-}
+use tracing::{debug, error, info, warn};
 
 /// Motion detection analyzer with GStreamer preprocessing and imageproc analysis
 pub struct MotionAnalyzer {
     config: AnalyzerConfig,
-    #[cfg(feature = "motion_analysis")]
     background_model: Option<GrayImage>,
-    #[cfg(feature = "motion_analysis")]
-    frame_count: u64,
-    #[cfg(not(feature = "motion_analysis"))]
-    simple_state: SimpleMotionState,
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-    preprocessing_pipeline: Option<Pipeline>,
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-    appsrc: Option<AppSrc>,
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-    appsink: Option<AppSink>,
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    pub(crate) frame_count: u64,
+    #[cfg(target_os = "linux")]
+    preprocessing_pipeline: Option<gstreamer::Pipeline>,
+    #[cfg(target_os = "linux")]
+    pub(crate) appsrc: Option<gstreamer_app::AppSrc>,
+    #[cfg(target_os = "linux")]
+    pub(crate) appsink: Option<gstreamer_app::AppSink>,
+    #[cfg(target_os = "linux")]
     preprocessing_dims: Option<(u32, u32)>,
 }
 
@@ -61,62 +36,48 @@ impl MotionAnalyzer {
             config
         );
 
-        #[cfg(feature = "motion_analysis")]
+        #[cfg(target_os = "linux")]
         {
-            #[cfg(target_os = "linux")]
-            {
-                // Initialize GStreamer for preprocessing
-                if let Err(e) = gstreamer::init() {
-                    warn!("Failed to initialize GStreamer for motion analysis: {}", e);
-                }
+            // Initialize GStreamer for preprocessing
+            if let Err(e) = gstreamer::init() {
+                warn!("Failed to initialize GStreamer for motion analysis: {}", e);
             }
-
-            let analyzer = Self {
-                config,
-                background_model: None,
-                frame_count: 0,
-                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-                preprocessing_pipeline: None,
-                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-                appsrc: None,
-                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-                appsink: None,
-                #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
-                preprocessing_dims: None,
-            };
-
-            info!("Motion analyzer initialized successfully");
-            Ok(analyzer)
         }
 
-        #[cfg(not(feature = "motion_analysis"))]
-        {
-            warn!("Motion analysis feature not enabled - using simple fallback implementation");
-            Ok(Self {
-                config,
-                simple_state: SimpleMotionState {
-                    frame_count: 0,
-                    last_motion_time: None,
-                },
-            })
-        }
+        let analyzer = Self {
+            config,
+            background_model: None,
+            frame_count: 0,
+            #[cfg(target_os = "linux")]
+            preprocessing_pipeline: None,
+            #[cfg(target_os = "linux")]
+            appsrc: None,
+            #[cfg(target_os = "linux")]
+            appsink: None,
+            #[cfg(target_os = "linux")]
+            preprocessing_dims: None,
+        };
+
+        info!("Motion analyzer initialized successfully");
+        Ok(analyzer)
     }
 
     /// Initialize GStreamer preprocessing pipeline for motion analysis with target dimensions
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     fn initialize_preprocessing_pipeline(
         &mut self,
         target_width: u32,
         target_height: u32,
     ) -> Result<()> {
+        use gstreamer::prelude::*;
+        use gstreamer_app::{AppSink, AppSrc};
+
         info!(
             "Initializing software GStreamer pipeline for motion analysis at {}x{} (scale 1/{})",
             target_width, target_height, self.config.jpeg_decode_scale
         );
 
         // Software pipeline - decode JPEG and scale down for motion analysis
-        // Note: jpegdec doesn't support idct-method property, so we decode at full resolution
-        // and then scale down using videoscale for better performance
         let sw_pipeline_desc = format!(
             "appsrc name=src format=time is-live=true caps=image/jpeg ! \
              jpegdec ! \
@@ -139,12 +100,11 @@ impl MotionAnalyzer {
             }
         })?;
 
-        let pipeline =
-            pipeline
-                .downcast::<Pipeline>()
-                .map_err(|_| AnalyzerError::FrameProcessing {
-                    details: "Failed to downcast to Pipeline".to_string(),
-                })?;
+        let pipeline = pipeline.downcast::<gstreamer::Pipeline>().map_err(|_| {
+            AnalyzerError::FrameProcessing {
+                details: "Failed to downcast to Pipeline".to_string(),
+            }
+        })?;
 
         let appsrc = pipeline
             .by_name("src")
@@ -187,7 +147,7 @@ impl MotionAnalyzer {
     }
 
     /// Ensure preprocessing pipeline is available and sized correctly
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     fn ensure_preprocessing_pipeline(
         &mut self,
         target_width: u32,
@@ -218,7 +178,6 @@ impl MotionAnalyzer {
         let motion_result = self.analyze_frame_sync(frame)?;
 
         if let Some(motion_area) = motion_result {
-            // Publish motion detection event
             if let Err(e) = event_bus
                 .publish(DoorcamEvent::MotionDetected {
                     contour_area: motion_area,
@@ -260,86 +219,63 @@ impl MotionAnalyzer {
     }
 
     /// Detect motion in a single frame
-    fn detect_motion_sync(&mut self, frame: &FrameData) -> Result<Option<f64>> {
-        #[cfg(feature = "motion_analysis")]
-        {
-            debug!(
-                "Analyzing frame {} for motion ({}x{}, {:?})",
-                frame.id, frame.width, frame.height, frame.format
-            );
+    pub(crate) fn detect_motion_sync(&mut self, frame: &FrameData) -> Result<Option<f64>> {
+        debug!(
+            "Analyzing frame {} for motion ({}x{}, {:?})",
+            frame.id, frame.width, frame.height, frame.format
+        );
 
-            // Convert frame data to grayscale image
-            let gray_image = self.frame_to_gray_image(frame)?;
+        let gray_image = self.frame_to_gray_image(frame)?;
 
-            // Apply Gaussian blur to reduce noise
-            let blurred = gaussian_blur_f32(&gray_image, 2.0);
+        // Apply Gaussian blur to reduce noise
+        let blurred = gaussian_blur_f32(&gray_image, 2.0);
 
-            // Initialize background model if this is the first frame
-            if self.background_model.is_none() {
-                info!("Initializing background model with first frame");
-                self.background_model = Some(blurred.clone());
-                self.frame_count = 1;
-                return Ok(None); // No motion on first frame
-            }
-
-            let background = self.background_model.as_ref().unwrap();
-
-            // Calculate frame difference
-            let diff_image = self.calculate_frame_difference(background, &blurred)?;
-
-            // Apply threshold to create binary mask
-            let threshold_value = self.config.delta_threshold as u8;
-            let binary_mask = threshold(&diff_image, threshold_value);
-
-            // Apply morphological operations to clean up noise
-            let kernel_size = 3u8;
-            let cleaned_mask = dilate(
-                &erode(&binary_mask, Norm::LInf, kernel_size),
-                Norm::LInf,
-                kernel_size,
-            );
-
-            // Find connected components (contours)
-            let components = connected_components(&cleaned_mask, Connectivity::Eight, Luma([0u8]));
-
-            // Calculate the largest component area
-            let max_area = self.calculate_largest_component_area(&components);
-
-            // Update background model (simple running average)
-            self.update_background_model(&blurred);
-            self.frame_count += 1;
-
-            debug!(
-                "Motion analysis complete: max component area = {:.2}",
-                max_area
-            );
-            Ok(if max_area > 0.0 { Some(max_area) } else { None })
+        // Initialize background model if this is the first frame
+        if self.background_model.is_none() {
+            info!("Initializing background model with first frame");
+            self.background_model = Some(blurred.clone());
+            self.frame_count = 1;
+            return Ok(None);
         }
 
-        #[cfg(not(feature = "motion_analysis"))]
-        {
-            // Simple fallback implementation that simulates motion detection
-            self.simple_state.frame_count += 1;
+        let background = self.background_model.as_ref().unwrap();
 
-            // Simulate motion detection every 10 frames for testing
-            if self.simple_state.frame_count % 10 == 0 {
-                let simulated_area = 1500.0; // Above default threshold
-                debug!("Simulated motion detection: area = {:.2}", simulated_area);
-                self.simple_state.last_motion_time = Some(std::time::SystemTime::now());
-                Ok(Some(simulated_area))
-            } else {
-                debug!("No simulated motion detected");
-                Ok(None)
-            }
-        }
+        // Calculate frame difference
+        let diff_image = self.calculate_frame_difference(background, &blurred)?;
+
+        // Apply threshold to create binary mask
+        let threshold_value = self.config.delta_threshold as u8;
+        let binary_mask = threshold(&diff_image, threshold_value);
+
+        // Apply morphological operations to clean up noise
+        let kernel_size = 3u8;
+        let cleaned_mask = dilate(
+            &erode(&binary_mask, Norm::LInf, kernel_size),
+            Norm::LInf,
+            kernel_size,
+        );
+
+        // Find connected components (contours)
+        let components = connected_components(&cleaned_mask, Connectivity::Eight, Luma([0u8]));
+
+        // Calculate the largest component area
+        let max_area = self.calculate_largest_component_area(&components);
+
+        // Update background model (simple running average)
+        self.update_background_model(&blurred);
+        self.frame_count += 1;
+
+        debug!(
+            "Motion analysis complete: max component area = {:.2}",
+            max_area
+        );
+        Ok(if max_area > 0.0 { Some(max_area) } else { None })
     }
 
     /// Convert frame data to grayscale image using GStreamer preprocessing when available
-    #[cfg(feature = "motion_analysis")]
     fn frame_to_gray_image(&mut self, frame: &FrameData) -> Result<GrayImage> {
         #[cfg(target_os = "linux")]
         {
-            // Try GStreamer preprocessing first for MJPEG frames
             if frame.format == FrameFormat::Mjpeg {
                 if let Ok(gray_image) = self.frame_to_gray_gstreamer(frame) {
                     return Ok(gray_image);
@@ -349,10 +285,8 @@ impl MotionAnalyzer {
             }
         }
 
-        // Fallback to direct processing
         match frame.format {
             FrameFormat::Mjpeg => {
-                // Decode MJPEG data
                 let dynamic_image = image::load_from_memory(&frame.data).map_err(|e| {
                     AnalyzerError::FrameProcessing {
                         details: format!("MJPEG decode failed: {}", e),
@@ -360,19 +294,13 @@ impl MotionAnalyzer {
                 })?;
                 Ok(dynamic_image.to_luma8())
             }
-            FrameFormat::Yuyv => {
-                // Convert YUYV to grayscale
-                self.yuyv_to_gray(frame)
-            }
-            FrameFormat::Rgb24 => {
-                // Convert RGB24 to grayscale
-                self.rgb24_to_gray(frame)
-            }
+            FrameFormat::Yuyv => self.yuyv_to_gray(frame),
+            FrameFormat::Rgb24 => self.rgb24_to_gray(frame),
         }
     }
 
     /// Convert MJPEG frame to grayscale using GStreamer preprocessing
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     fn frame_to_gray_gstreamer(&mut self, frame: &FrameData) -> Result<GrayImage> {
         let scale = std::cmp::max(1, self.config.jpeg_decode_scale);
         let mut target_width = std::cmp::max(1, frame.width / scale);
@@ -440,7 +368,6 @@ impl MotionAnalyzer {
                         details: format!("Failed to map processed buffer: {}", e),
                     })?;
 
-                // Create grayscale image from processed data at the scaled resolution
                 let gray_image =
                     GrayImage::from_raw(target_width, target_height, map.as_slice().to_vec())
                         .ok_or_else(|| AnalyzerError::FrameProcessing {
@@ -449,7 +376,7 @@ impl MotionAnalyzer {
                         })?;
 
                 debug!(
-                    "Successfully preprocessed frame {} using GStreamer 1/{} resolution decode ({}x{})", 
+                    "Successfully preprocessed frame {} using GStreamer 1/{} resolution decode ({}x{})",
                     frame.id, self.config.jpeg_decode_scale, target_width, target_height
                 );
                 return Ok(gray_image);
@@ -468,7 +395,6 @@ impl MotionAnalyzer {
     }
 
     /// Convert YUYV frame to grayscale
-    #[cfg(feature = "motion_analysis")]
     fn yuyv_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
         let width = frame.width;
         let height = frame.height;
@@ -479,8 +405,8 @@ impl MotionAnalyzer {
             for x in 0..(width / 2) {
                 let base_idx = ((y * width / 2 + x) * 4) as usize;
                 if base_idx + 3 < frame.data.len() {
-                    let y0 = frame.data[base_idx]; // First pixel Y
-                    let y1 = frame.data[base_idx + 2]; // Second pixel Y
+                    let y0 = frame.data[base_idx];
+                    let y1 = frame.data[base_idx + 2];
 
                     gray_image.put_pixel(x * 2, y, Luma([y0]));
                     if x * 2 + 1 < width {
@@ -494,12 +420,10 @@ impl MotionAnalyzer {
     }
 
     /// Convert RGB24 frame to grayscale
-    #[cfg(feature = "motion_analysis")]
     fn rgb24_to_gray(&self, frame: &FrameData) -> Result<GrayImage> {
         let width = frame.width;
         let height = frame.height;
 
-        // Create RGB image from raw data
         let rgb_image =
             RgbImage::from_raw(width, height, frame.data.to_vec()).ok_or_else(|| {
                 AnalyzerError::FrameProcessing {
@@ -507,7 +431,6 @@ impl MotionAnalyzer {
                 }
             })?;
 
-        // Convert to grayscale using standard luminance formula
         let mut gray_image = GrayImage::new(width, height);
         for (x, y, rgb) in rgb_image.enumerate_pixels() {
             let gray_value =
@@ -519,7 +442,6 @@ impl MotionAnalyzer {
     }
 
     /// Calculate frame difference between background and current frame
-    #[cfg(feature = "motion_analysis")]
     fn calculate_frame_difference(
         &self,
         background: &GrayImage,
@@ -539,14 +461,12 @@ impl MotionAnalyzer {
     }
 
     /// Calculate the area of the largest connected component
-    #[cfg(feature = "motion_analysis")]
     fn calculate_largest_component_area(
         &self,
         components: &ImageBuffer<Luma<u32>, Vec<u32>>,
     ) -> f64 {
         let mut component_counts = std::collections::HashMap::new();
 
-        // Count pixels in each component (skip background component 0)
         for pixel in components.pixels() {
             let component_id = pixel[0];
             if component_id > 0 {
@@ -554,15 +474,13 @@ impl MotionAnalyzer {
             }
         }
 
-        // Return the size of the largest component
         component_counts.values().max().copied().unwrap_or(0) as f64
     }
 
     /// Update background model using simple running average
-    #[cfg(feature = "motion_analysis")]
     fn update_background_model(&mut self, current_frame: &GrayImage) {
         if let Some(ref mut background) = self.background_model {
-            let learning_rate = 0.05; // 5% learning rate
+            let learning_rate = 0.05;
 
             for (bg_pixel, curr_pixel) in background.pixels_mut().zip(current_frame.pixels()) {
                 let bg_val = bg_pixel[0] as f32;
@@ -578,15 +496,21 @@ impl MotionAnalyzer {
         &self.config
     }
 
+    pub(crate) fn background_initialized(&self) -> bool {
+        self.background_model.is_some()
+    }
+
     /// Update configuration (requires restart of analysis loop)
     pub fn update_config(&mut self, config: AnalyzerConfig) {
         info!("Updating motion analyzer configuration: {:?}", config);
         self.config = config;
     }
 
-    /// Cleanup GStreamer resources
-    #[cfg(all(feature = "motion_analysis", target_os = "linux"))]
+    /// Cleanup GStreamer resources (no-op on non-Linux)
+    #[cfg(target_os = "linux")]
     pub fn cleanup(&mut self) {
+        use gstreamer::prelude::*;
+
         if let Some(ref pipeline) = self.preprocessing_pipeline {
             debug!("Stopping GStreamer preprocessing pipeline");
             if let Err(e) = pipeline.set_state(gstreamer::State::Null) {
@@ -600,7 +524,7 @@ impl MotionAnalyzer {
         debug!("GStreamer preprocessing pipeline cleaned up");
     }
 
-    #[cfg(not(all(feature = "motion_analysis", target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     pub fn cleanup(&mut self) {
         // No-op for non-GStreamer builds
     }
@@ -651,7 +575,6 @@ mod tests {
         assert_eq!(analyzer.config().contour_minimum_area, 2000.0);
     }
 
-    #[cfg(feature = "motion_analysis")]
     #[tokio::test]
     async fn test_motion_detection_with_synthetic_frame() {
         let config = AnalyzerConfig {
@@ -663,10 +586,9 @@ mod tests {
 
         let mut analyzer = MotionAnalyzer::new(config).await.unwrap();
 
-        // Create a simple RGB24 frame instead of MJPEG to avoid decoding issues
         let width = 64;
         let height = 48;
-        let rgb_data = vec![128u8; (width * height * 3) as usize]; // Gray image
+        let rgb_data = vec![128u8; (width * height * 3) as usize];
 
         let frame = FrameData::new(
             1,
@@ -677,7 +599,6 @@ mod tests {
             FrameFormat::Rgb24,
         );
 
-        // Use timeout to prevent hanging
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             tokio::task::spawn_blocking(move || analyzer.detect_motion_sync(&frame)),
@@ -685,20 +606,13 @@ mod tests {
         .await;
 
         match result {
-            Ok(Ok(motion_result)) => {
-                // Motion detection completed successfully
-                match motion_result {
-                    Ok(_) => {
-                        // Motion detection succeeded
-                    }
-                    Err(crate::error::DoorcamError::Analyzer(_)) => {
-                        // Expected error with synthetic data
-                    }
-                    Err(e) => {
-                        panic!("Unexpected error: {}", e);
-                    }
+            Ok(Ok(motion_result)) => match motion_result {
+                Ok(_) => {}
+                Err(crate::error::DoorcamError::Analyzer(_)) => {}
+                Err(e) => {
+                    panic!("Unexpected error: {}", e);
                 }
-            }
+            },
             Ok(Err(_)) => {
                 panic!("Task panicked during motion detection");
             }

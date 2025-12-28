@@ -107,7 +107,6 @@ pub enum AnalyzerError {
     #[error("Feature not available (motion analysis disabled)")]
     NotAvailable,
 
-    #[cfg(feature = "motion_analysis")]
     #[error("Image processing error: {0}")]
     ImageError(#[from] image::ImageError),
 }

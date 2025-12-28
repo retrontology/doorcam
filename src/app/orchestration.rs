@@ -27,24 +27,23 @@ impl DoorcamOrchestrator {
     pub fn new(_config: crate::config::DoorcamConfig) -> crate::error::Result<Self> {
         Ok(Self { _placeholder: 0 })
     }
-    
+
     /// Initialize all system components
     pub async fn initialize(&mut self) -> crate::error::Result<()> {
         Ok(())
     }
-    
+
     /// Start all system components
     pub async fn start(&mut self) -> crate::error::Result<()> {
         Ok(())
     }
-    
+
     /// Run the main application loop with signal handling
     pub async fn run(&mut self) -> crate::error::Result<i32> {
         Ok(0)
     }
 }
-#
-[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::DoorcamConfig;
@@ -82,13 +81,11 @@ mod tests {
                 trim_old: true,
                 retention_days: 7,
             },
-            #[cfg(feature = "streaming")]
             stream: crate::config::StreamConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8080,
                 rotation: None,
             },
-            #[cfg(feature = "display")]
             display: crate::config::DisplayConfig {
                 framebuffer_device: "/dev/fb0".to_string(),
                 backlight_device: "/sys/class/backlight/rpi_backlight/brightness".to_string(),
@@ -111,7 +108,7 @@ mod tests {
     async fn test_orchestrator_initialization() {
         let config = create_test_config();
         let mut orchestrator = DoorcamOrchestrator::new(config).unwrap();
-        
+
         let result = orchestrator.initialize().await;
         assert!(result.is_ok());
     }
@@ -120,10 +117,10 @@ mod tests {
     async fn test_orchestrator_start() {
         let config = create_test_config();
         let mut orchestrator = DoorcamOrchestrator::new(config).unwrap();
-        
+
         // Initialize first
         orchestrator.initialize().await.unwrap();
-        
+
         // Then start
         let result = orchestrator.start().await;
         assert!(result.is_ok());
@@ -133,11 +130,11 @@ mod tests {
     async fn test_orchestrator_run() {
         let config = create_test_config();
         let mut orchestrator = DoorcamOrchestrator::new(config).unwrap();
-        
+
         // Initialize and start
         orchestrator.initialize().await.unwrap();
         orchestrator.start().await.unwrap();
-        
+
         // Run should return exit code 0
         let result = orchestrator.run().await;
         assert!(result.is_ok());
@@ -154,18 +151,18 @@ mod tests {
             ComponentState::Stopping,
             ComponentState::Failed,
         ];
-        
+
         // Test Debug trait
         for state in &states {
             let debug_str = format!("{:?}", state);
             assert!(!debug_str.is_empty());
         }
-        
+
         // Test Clone trait
         let original = ComponentState::Running;
         let cloned = original.clone();
         assert_eq!(original, cloned);
-        
+
         // Test PartialEq trait
         assert_eq!(ComponentState::Running, ComponentState::Running);
         assert_ne!(ComponentState::Running, ComponentState::Failed);
@@ -180,27 +177,27 @@ mod tests {
             ShutdownReason::UserRequest,
             ShutdownReason::HealthCheck,
         ];
-        
+
         // Test Debug trait
         for reason in &reasons {
             let debug_str = format!("{:?}", reason);
             assert!(!debug_str.is_empty());
         }
-        
+
         // Test Clone trait
         let original = ShutdownReason::UserRequest;
         let cloned = original.clone();
         match (original, cloned) {
-            (ShutdownReason::UserRequest, ShutdownReason::UserRequest) => {},
+            (ShutdownReason::UserRequest, ShutdownReason::UserRequest) => {}
             _ => panic!("Clone failed for ShutdownReason::UserRequest"),
         }
-        
+
         // Test specific variants
         match ShutdownReason::Signal("TEST".to_string()) {
             ShutdownReason::Signal(sig) => assert_eq!(sig, "TEST"),
             _ => panic!("Expected Signal variant"),
         }
-        
+
         match ShutdownReason::Error("test error".to_string()) {
             ShutdownReason::Error(msg) => assert_eq!(msg, "test error"),
             _ => panic!("Expected Error variant"),
@@ -211,11 +208,11 @@ mod tests {
     async fn test_orchestrator_lifecycle() {
         let config = create_test_config();
         let mut orchestrator = DoorcamOrchestrator::new(config).unwrap();
-        
+
         // Test complete lifecycle
         assert!(orchestrator.initialize().await.is_ok());
         assert!(orchestrator.start().await.is_ok());
-        
+
         // Run should complete successfully
         let exit_code = orchestrator.run().await.unwrap();
         assert_eq!(exit_code, 0);

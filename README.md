@@ -102,10 +102,15 @@ export RUST_LOG=doorcam=debug
 
 ```
 src/
-├── main.rs          # Application entry point and CLI
-├── lib.rs           # Library exports
-├── config.rs        # Configuration management
-└── error.rs         # Error types and handling
+├── main.rs              # Application entry point and CLI
+├── lib.rs               # Module wiring and public re-exports
+├── app/                 # Orchestrator, keyboard/debug utilities
+├── core/                # Config, error, events, frames, ring buffer, recovery
+├── features/            # Camera, analyzer, capture, display, touch, streaming
+├── integrations/        # Integration layers (camera/buffer, capture, display, storage, streaming)
+├── infrastructure/      # Storage subsystem and WAL implementation
+└── bin/
+    └── wal_tool.rs      # WAL maintenance utility
 ```
 
 ### Building

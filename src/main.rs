@@ -2,8 +2,6 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::{error, info};
 
-mod config;
-mod error;
 use doorcam::{DoorcamConfig, DoorcamOrchestrator};
 
 #[derive(Parser, Debug)]

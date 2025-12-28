@@ -8,13 +8,13 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
-#[cfg(all(feature = "camera", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer::prelude::*;
-#[cfg(all(feature = "camera", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer::Pipeline;
-#[cfg(all(feature = "camera", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer_app::AppSink;
-#[cfg(all(feature = "camera", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer_video::VideoInfo;
 
 /// GStreamer-based camera interface with hardware acceleration support
@@ -22,7 +22,7 @@ pub struct CameraInterface {
     config: CameraConfig,
     frame_counter: Arc<AtomicU64>,
     is_running: Arc<AtomicBool>,
-    #[cfg(all(feature = "camera", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pipeline: Option<Pipeline>,
     capture_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
@@ -35,7 +35,7 @@ impl CameraInterface {
             config.index, config.resolution.0, config.resolution.1, config.fps
         );
 
-        #[cfg(all(feature = "camera", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         {
             // Initialize GStreamer
             gstreamer::init().map_err(|e| {
@@ -49,7 +49,7 @@ impl CameraInterface {
             config,
             frame_counter: Arc::new(AtomicU64::new(0)),
             is_running: Arc::new(AtomicBool::new(false)),
-            #[cfg(all(feature = "camera", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             pipeline: None,
             capture_task: Arc::new(tokio::sync::Mutex::new(None)),
         };
@@ -60,7 +60,7 @@ impl CameraInterface {
     }
 
     /// Initialize GStreamer pipeline with hardware acceleration
-    #[cfg(all(feature = "camera", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     async fn initialize_pipeline(&mut self) -> Result<()> {
         let pipeline_desc = self.build_pipeline_string()?;
 
@@ -81,14 +81,12 @@ impl CameraInterface {
     }
 
     /// Build GStreamer pipeline string for MJPEG capture
-    #[cfg(all(feature = "camera", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     fn build_pipeline_string(&self) -> Result<String> {
         let (width, height) = self.config.resolution;
         let fps = self.config.fps;
         let device_index = self.config.index;
 
-        // Simple MJPEG pipeline - capture JPEG frames directly without decoding
-        // Use io-mode=mmap for efficient memory-mapped I/O
         let pipeline = format!(
             "v4l2src device=/dev/video{} io-mode=mmap do-timestamp=true ! \
              image/jpeg,width={},height={},framerate={}/1 ! \
@@ -101,7 +99,7 @@ impl CameraInterface {
     }
 
     /// Initialize pipeline when GStreamer feature is disabled
-    #[cfg(not(all(feature = "camera", target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     async fn initialize_pipeline(&mut self) -> Result<()> {
         warn!("GStreamer camera interface is only available on Linux with camera feature");
         Ok(())
@@ -117,7 +115,7 @@ impl CameraInterface {
         info!("Starting GStreamer camera capture");
         self.is_running.store(true, Ordering::Relaxed);
 
-        #[cfg(all(feature = "camera", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         {
             if let Some(pipeline) = &self.pipeline {
                 self.run_gst_capture_loop(pipeline.clone(), ring_buffer)
@@ -130,7 +128,7 @@ impl CameraInterface {
             }
         }
 
-        #[cfg(not(all(feature = "camera", target_os = "linux")))]
+        #[cfg(not(target_os = "linux"))]
         {
             self.run_mock_capture_loop(ring_buffer).await?;
         }
@@ -139,7 +137,7 @@ impl CameraInterface {
     }
 
     /// Run GStreamer capture loop
-    #[cfg(all(feature = "camera", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     async fn run_gst_capture_loop(
         &self,
         pipeline: Pipeline,
@@ -150,14 +148,12 @@ impl CameraInterface {
         let frame_counter = Arc::clone(&self.frame_counter);
 
         let task = tokio::spawn(async move {
-            // Get the appsink element
             let appsink = pipeline
                 .by_name("sink")
                 .expect("Failed to get appsink")
                 .downcast::<AppSink>()
                 .expect("Failed to downcast to AppSink");
 
-            // Set up sample callback
             let (tx, mut rx) = mpsc::unbounded_channel();
 
             appsink.set_callbacks(
@@ -172,7 +168,6 @@ impl CameraInterface {
                     .build(),
             );
 
-            // Start pipeline
             if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
                 error!("Failed to start GStreamer pipeline: {}", e);
                 return;
@@ -180,7 +175,6 @@ impl CameraInterface {
 
             info!("GStreamer pipeline started successfully");
 
-            // Process samples
             while is_running.load(Ordering::Relaxed) {
                 tokio::select! {
                     sample = rx.recv() => {
@@ -200,7 +194,6 @@ impl CameraInterface {
                 }
             }
 
-            // Stop pipeline
             let _ = pipeline.set_state(gstreamer::State::Null);
             info!("GStreamer capture loop stopped");
         });
@@ -210,7 +203,7 @@ impl CameraInterface {
     }
 
     /// Process a GStreamer sample into a frame
-    #[cfg(all(feature = "camera", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     async fn process_gst_sample(
         sample: gstreamer::Sample,
         frame_counter: &Arc<AtomicU64>,
@@ -224,7 +217,6 @@ impl CameraInterface {
             details: "No caps in sample".to_string(),
         })?;
 
-        // Get video info from caps
         let video_info = VideoInfo::from_caps(caps).map_err(|e| CameraError::CaptureStream {
             details: format!("Failed to get video info: {}", e),
         })?;
@@ -232,7 +224,6 @@ impl CameraInterface {
         let width = video_info.width();
         let height = video_info.height();
 
-        // Map buffer for reading
         let map = buffer
             .map_readable()
             .map_err(|e| CameraError::CaptureStream {
@@ -242,14 +233,13 @@ impl CameraInterface {
         let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now();
 
-        // Store the raw JPEG data directly - much more efficient!
         let frame_data = FrameData::new(
             frame_id,
             timestamp,
             map.as_slice().to_vec(),
             width,
             height,
-            FrameFormat::Mjpeg, // Store as MJPEG
+            FrameFormat::Mjpeg,
         );
 
         trace!(
@@ -266,9 +256,8 @@ impl CameraInterface {
     }
 
     /// Run mock capture loop when GStreamer is not available
-    #[cfg(not(all(feature = "camera", target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     async fn run_mock_capture_loop(&self, ring_buffer: Arc<RingBuffer>) -> Result<()> {
-        // Same mock implementation as the v4l version
         let config = self.config.clone();
         let is_running = Arc::clone(&self.is_running);
         let capture_task = Arc::clone(&self.capture_task);
@@ -290,30 +279,20 @@ impl CameraInterface {
                 let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
                 let timestamp = SystemTime::now();
 
-                // Generate mock MJPEG frame data (minimal JPEG header + data)
                 let width = config.resolution.0;
                 let height = config.resolution.1;
 
-                // Create a minimal mock JPEG frame (just header bytes for testing)
                 let mut data = vec![
-                    0xFF, 0xD8, // JPEG SOI (Start of Image)
-                    0xFF, 0xE0, // JFIF marker
-                    0x00, 0x10, // Length
-                    0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
-                    0x01, 0x01, // Version 1.1
-                    0x01, // Units (1 = pixels per inch)
-                    0x00, 0x48, 0x00, 0x48, // X and Y density (72 DPI)
-                    0x00, 0x00, // Thumbnail width and height (0 = no thumbnail)
+                    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01,
+                    0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00,
                 ];
 
-                // Add some mock image data based on frame ID
                 let pattern_size = 1000 + (frame_id % 500) as usize;
                 let pattern_byte = (frame_id % 256) as u8;
                 data.extend(vec![pattern_byte; pattern_size]);
-
-                // Add JPEG EOI (End of Image)
                 data.extend_from_slice(&[0xFF, 0xD9]);
 
+                let data_len = data.len();
                 let frame_data =
                     FrameData::new(frame_id, timestamp, data, width, height, FrameFormat::Mjpeg);
 
@@ -322,7 +301,7 @@ impl CameraInterface {
                     frame_id,
                     width,
                     height,
-                    data.len()
+                    data_len
                 );
                 ring_buffer.push_frame(frame_data).await;
             }
@@ -379,10 +358,9 @@ impl CameraInterface {
 
     /// Test GStreamer pipeline
     pub async fn test_connection(&self) -> Result<()> {
-        #[cfg(all(feature = "camera", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         {
             if let Some(pipeline) = &self.pipeline {
-                // Test pipeline by setting it to READY state
                 pipeline.set_state(gstreamer::State::Ready).map_err(|e| {
                     CameraError::Configuration {
                         details: format!("Pipeline test failed: {}", e),
@@ -405,159 +383,10 @@ impl CameraInterface {
             }
         }
 
-        #[cfg(not(all(feature = "camera", target_os = "linux")))]
+        #[cfg(not(target_os = "linux"))]
         {
             debug!("GStreamer pipeline test successful (mock mode)");
             Ok(())
         }
-    }
-}
-
-/// Builder for GStreamer camera interface
-pub struct CameraInterfaceBuilder {
-    config: Option<CameraConfig>,
-}
-
-impl CameraInterfaceBuilder {
-    pub fn new() -> Self {
-        Self { config: None }
-    }
-
-    pub fn config(mut self, config: CameraConfig) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    pub async fn build(self) -> Result<CameraInterface> {
-        let config = self
-            .config
-            .ok_or_else(|| DoorcamError::system("Camera configuration must be specified"))?;
-
-        CameraInterface::new(config).await
-    }
-}
-
-impl Default for CameraInterfaceBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::CameraConfig;
-
-    fn create_test_camera_config() -> CameraConfig {
-        CameraConfig {
-            index: 0,
-            resolution: (640, 480),
-            fps: 30,
-            format: "MJPG".to_string(),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_camera_interface_creation() {
-        let config = create_test_camera_config();
-
-        // This may fail if no camera hardware is available, which is expected in CI
-        match CameraInterface::new(config).await {
-            Ok(camera) => {
-                assert!(!camera.is_capturing());
-                assert_eq!(camera.frame_count(), 0);
-            }
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen {
-                ..
-            })) => {
-                // Expected when no camera hardware is available
-                println!("Camera hardware not available - test passed");
-            }
-            Err(e) => {
-                panic!("Unexpected error creating camera interface: {}", e);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_camera_builder_pattern() {
-        let config = create_test_camera_config();
-
-        let builder = CameraInterfaceBuilder::new().config(config);
-
-        match builder.build().await {
-            Ok(camera) => {
-                assert!(!camera.is_capturing());
-            }
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen {
-                ..
-            })) => {
-                // Expected when no camera hardware is available
-                println!("Camera hardware not available - builder test passed");
-            }
-            Err(e) => {
-                panic!("Unexpected error in camera builder: {}", e);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_camera_builder_validation() {
-        let builder = CameraInterfaceBuilder::new();
-
-        // Should fail without config
-        let result = builder.build().await;
-        assert!(result.is_err());
-
-        if let Err(crate::error::DoorcamError::System { message }) = result {
-            assert!(message.contains("Camera configuration must be specified"));
-        } else {
-            panic!("Expected system error for missing configuration");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_camera_test_connection() {
-        let config = create_test_camera_config();
-
-        match CameraInterface::new(config).await {
-            Ok(camera) => {
-                // Test connection should work even if camera isn't capturing
-                let result = camera.test_connection().await;
-                // Result may vary based on hardware availability
-                match result {
-                    Ok(()) => {
-                        println!("Camera connection test passed");
-                    }
-                    Err(_) => {
-                        println!("Camera connection test failed - expected without hardware");
-                    }
-                }
-            }
-            Err(crate::error::DoorcamError::Camera(crate::error::CameraError::DeviceOpen {
-                ..
-            })) => {
-                println!("Camera hardware not available - skipping connection test");
-            }
-            Err(e) => {
-                panic!("Unexpected error: {}", e);
-            }
-        }
-    }
-
-    #[test]
-    fn test_camera_config_validation() {
-        let config = CameraConfig {
-            index: 0,
-            resolution: (640, 480),
-            fps: 30,
-            format: "MJPG".to_string(),
-        };
-
-        // Basic validation - config should be valid
-        assert_eq!(config.index, 0);
-        assert_eq!(config.resolution, (640, 480));
-        assert_eq!(config.fps, 30);
-        assert_eq!(config.format, "MJPG");
     }
 }

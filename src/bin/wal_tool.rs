@@ -16,11 +16,11 @@ use serde::Serialize;
 use tokio::fs;
 use tracing::{error, info, warn};
 
-#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer::prelude::*;
-#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer::Pipeline;
-#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use gstreamer_app::AppSrc;
 
 /// Convert a WAL file into media assets (images, video, metadata).
@@ -353,90 +353,80 @@ async fn add_timestamp_overlay(
     timestamp: SystemTime,
     config: &CaptureConfig,
 ) -> Result<Arc<Vec<u8>>> {
-    #[cfg(feature = "motion_analysis")]
-    {
-        use image::{DynamicImage, ImageFormat, Rgba};
-        use imageproc::drawing::{draw_text_mut, text_size};
-        use rusttype::{Font, Scale};
-        use std::fs as stdfs;
+    use image::{DynamicImage, ImageFormat, Rgba};
+    use imageproc::drawing::{draw_text_mut, text_size};
+    use rusttype::{Font, Scale};
+    use std::fs as stdfs;
 
-        let mut img = image::load_from_memory_with_format(jpeg_data, ImageFormat::Jpeg)
-            .map_err(|e| DoorcamError::component("waltool", &format!("JPEG decode failed: {}", e)))?
-            .to_rgba8();
+    let mut img = image::load_from_memory_with_format(jpeg_data, ImageFormat::Jpeg)
+        .map_err(|e| DoorcamError::component("waltool", &format!("JPEG decode failed: {}", e)))?
+        .to_rgba8();
 
-        let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
-        let datetime = DateTime::<Utc>::from(timestamp).with_timezone(&timezone);
-        let timestamp_text = datetime.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string();
+    let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
+    let datetime = DateTime::<Utc>::from(timestamp).with_timezone(&timezone);
+    let timestamp_text = datetime.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string();
 
-        let font_data = stdfs::read(&config.timestamp_font_path).map_err(|e| {
-            DoorcamError::component(
-                "waltool",
-                &format!(
-                    "Failed to read font file '{}': {}",
-                    config.timestamp_font_path, e
-                ),
-            )
-        })?;
+    let font_data = stdfs::read(&config.timestamp_font_path).map_err(|e| {
+        DoorcamError::component(
+            "waltool",
+            &format!(
+                "Failed to read font file '{}': {}",
+                config.timestamp_font_path, e
+            ),
+        )
+    })?;
 
-        let font = Font::try_from_vec(font_data).ok_or_else(|| {
-            DoorcamError::component(
-                "waltool",
-                &format!("Failed to parse font file '{}'", config.timestamp_font_path),
-            )
-        })?;
+    let font = Font::try_from_vec(font_data).ok_or_else(|| {
+        DoorcamError::component(
+            "waltool",
+            &format!("Failed to parse font file '{}'", config.timestamp_font_path),
+        )
+    })?;
 
-        let scale = Scale::uniform(config.timestamp_font_size);
-        let x: u32 = 10;
-        let y: u32 = img
-            .height()
-            .saturating_sub((config.timestamp_font_size * 1.5) as u32);
+    let scale = Scale::uniform(config.timestamp_font_size);
+    let x: u32 = 10;
+    let y: u32 = img
+        .height()
+        .saturating_sub((config.timestamp_font_size * 1.5) as u32);
 
-        let (text_width, text_height) = text_size(scale, &font, &timestamp_text);
+    let (text_width, text_height) = text_size(scale, &font, &timestamp_text);
 
-        for dy in 0..(text_height as u32 + 10) {
-            for dx in 0..(text_width as u32 + 10) {
-                let px = x.saturating_sub(5) + dx;
-                let py = y.saturating_sub(5) + dy;
-                if px < img.width() && py < img.height() {
-                    let pixel = img.get_pixel(px, py);
-                    img.put_pixel(
-                        px,
-                        py,
-                        Rgba([pixel[0] / 3, pixel[1] / 3, pixel[2] / 3, 255]),
-                    );
-                }
+    for dy in 0..(text_height as u32 + 10) {
+        for dx in 0..(text_width as u32 + 10) {
+            let px = x.saturating_sub(5) + dx;
+            let py = y.saturating_sub(5) + dy;
+            if px < img.width() && py < img.height() {
+                let pixel = img.get_pixel(px, py);
+                img.put_pixel(
+                    px,
+                    py,
+                    Rgba([pixel[0] / 3, pixel[1] / 3, pixel[2] / 3, 255]),
+                );
             }
         }
-
-        draw_text_mut(
-            &mut img,
-            Rgba([255, 255, 255, 255]),
-            x as i32,
-            y as i32,
-            scale,
-            &font,
-            &timestamp_text,
-        );
-
-        let mut output = Vec::new();
-        DynamicImage::ImageRgba8(img)
-            .write_to(&mut std::io::Cursor::new(&mut output), ImageFormat::Jpeg)
-            .map_err(|e| {
-                DoorcamError::component(
-                    "waltool",
-                    &format!("Failed to encode JPEG with overlay: {}", e),
-                )
-            })?;
-
-        Ok(Arc::new(output))
     }
 
-    #[cfg(not(feature = "motion_analysis"))]
-    {
-        let _ = (timestamp, config);
-        warn!("Timestamp overlay requested but motion_analysis feature is disabled");
-        Ok(Arc::new(jpeg_data.to_vec()))
-    }
+    draw_text_mut(
+        &mut img,
+        Rgba([255, 255, 255, 255]),
+        x as i32,
+        y as i32,
+        scale,
+        &font,
+        &timestamp_text,
+    );
+
+    let mut output = Vec::new();
+    DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut output), ImageFormat::Jpeg)
+        .map_err(|e| {
+            DoorcamError::component(
+                "waltool",
+                &format!("Failed to encode JPEG with overlay: {}", e),
+            )
+        })?;
+
+    Ok(Arc::new(output))
 }
 
 fn map_capture_rotation(rotation: Option<&CaptureRotation>) -> Option<FrameRotation> {
@@ -460,7 +450,7 @@ fn resolve_timestamp_timezone(tz_name: &str) -> Tz {
     }
 }
 
-#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 async fn create_video_from_frames(
     frames: &[FrameData],
     video_path: &Path,
@@ -495,7 +485,7 @@ async fn create_video_from_frames(
     encode_frames_with_pipeline("waltool", &pipeline_desc, frames, video_path, config).await
 }
 
-#[cfg(all(feature = "video_encoding", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 async fn encode_frames_with_pipeline(
     label: &str,
     pipeline_desc: &str,
@@ -667,7 +657,7 @@ async fn encode_frames_with_pipeline(
     Ok(())
 }
 
-#[cfg(not(all(feature = "video_encoding", target_os = "linux")))]
+#[cfg(not(target_os = "linux"))]
 async fn create_video_from_frames(
     _frames: &[FrameData],
     _video_path: &Path,
