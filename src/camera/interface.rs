@@ -155,6 +155,9 @@ impl CameraInterface {
                 .expect("Failed to downcast to AppSink");
 
             let (tx, mut rx) = mpsc::unbounded_channel();
+            let mut last_sample_time = tokio::time::Instant::now();
+            let mut watchdog_interval = tokio::time::interval(Duration::from_secs(1));
+            let watchdog_timeout = Duration::from_secs(5);
 
             appsink.set_callbacks(
                 gstreamer_app::AppSinkCallbacks::builder()
@@ -185,6 +188,21 @@ impl CameraInterface {
                                 &ring_buffer
                             ).await {
                                 error!("Error processing GStreamer sample: {}", e);
+                            }
+                            last_sample_time = tokio::time::Instant::now();
+                        }
+                    }
+                    _ = watchdog_interval.tick() => {
+                        if last_sample_time.elapsed() >= watchdog_timeout {
+                            warn!(
+                                "No camera frames received for {:?}; restarting pipeline",
+                                watchdog_timeout
+                            );
+                            let _ = pipeline.set_state(gstreamer::State::Null);
+                            if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+                                error!("Failed to restart GStreamer pipeline: {}", e);
+                            } else {
+                                last_sample_time = tokio::time::Instant::now();
                             }
                         }
                     }

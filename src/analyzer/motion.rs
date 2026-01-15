@@ -348,14 +348,17 @@ impl MotionAnalyzer {
                 ));
 
             // Push buffer to pipeline
-            appsrc
-                .push_buffer(buffer)
-                .map_err(|e| AnalyzerError::FrameProcessing {
+            if let Err(e) = appsrc.push_buffer(buffer) {
+                self.cleanup();
+                return Err(AnalyzerError::FrameProcessing {
                     details: format!("Failed to push buffer to preprocessing pipeline: {:?}", e),
-                })?;
+                }
+                .into());
+            }
 
-            // Pull processed sample
-            if let Ok(sample) = appsink.pull_sample() {
+            // Pull processed sample with a timeout to avoid blocking indefinitely
+            let timeout = gstreamer::ClockTime::from_mseconds(200);
+            if let Some(sample) = appsink.try_pull_sample(timeout) {
                 let buffer = sample
                     .buffer()
                     .ok_or_else(|| AnalyzerError::FrameProcessing {
@@ -381,8 +384,9 @@ impl MotionAnalyzer {
                 );
                 return Ok(gray_image);
             } else {
+                self.cleanup();
                 return Err(AnalyzerError::FrameProcessing {
-                    details: "No sample available from GStreamer pipeline".to_string(),
+                    details: "No sample available from GStreamer pipeline (timeout)".to_string(),
                 }
                 .into());
             }
