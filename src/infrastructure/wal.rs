@@ -219,7 +219,36 @@ impl WalReader {
 
     /// Read all frames from the WAL
     pub async fn read_all_frames(&self) -> Result<Vec<FrameData>> {
-        let mut file = File::open(&self.path).await.map_err(|e| {
+        let mut reader = WalFrameReader::open(self.path.clone()).await?;
+        let frame_count = reader.frame_count();
+
+        info!(
+            "Reading {} frames from WAL: {}",
+            frame_count,
+            self.path.display()
+        );
+
+        let mut frames = Vec::with_capacity(frame_count as usize);
+        while let Some(frame) = reader.next_frame().await? {
+            frames.push(frame);
+        }
+
+        info!("Read {} frames from WAL", frames.len());
+        Ok(frames)
+    }
+}
+
+/// Streaming WAL frame reader
+pub struct WalFrameReader {
+    file: File,
+    frame_count: u32,
+    path: PathBuf,
+}
+
+impl WalFrameReader {
+    /// Open a WAL file and validate the header
+    pub async fn open(path: PathBuf) -> Result<Self> {
+        let mut file = File::open(&path).await.map_err(|e| {
             DoorcamError::component("wal", &format!("Failed to open WAL file: {}", e))
         })?;
 
@@ -249,66 +278,70 @@ impl WalReader {
         // Read frame count
         let frame_count = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
 
-        info!(
-            "Reading {} frames from WAL: {}",
+        Ok(Self {
+            file,
             frame_count,
-            self.path.display()
+            path,
+        })
+    }
+
+    /// Get the frame count recorded in the WAL header
+    pub fn frame_count(&self) -> u32 {
+        self.frame_count
+    }
+
+    /// Read the next frame from the WAL (None on EOF)
+    pub async fn next_frame(&mut self) -> Result<Option<FrameData>> {
+        // Read timestamp (8 bytes)
+        let mut timestamp_buf = [0u8; 8];
+        match self.file.read_exact(&mut timestamp_buf).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => {
+                return Err(DoorcamError::component(
+                    "wal",
+                    &format!("Failed to read timestamp: {}", e),
+                ))
+            }
+        }
+        let timestamp_nanos = u64::from_le_bytes(timestamp_buf);
+        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_nanos(timestamp_nanos);
+
+        // Read frame ID (8 bytes)
+        let mut id_buf = [0u8; 8];
+        self.file.read_exact(&mut id_buf).await.map_err(|e| {
+            DoorcamError::component("wal", &format!("Failed to read frame ID: {}", e))
+        })?;
+        let frame_id = u64::from_le_bytes(id_buf);
+
+        // Read data length (4 bytes)
+        let mut len_buf = [0u8; 4];
+        self.file.read_exact(&mut len_buf).await.map_err(|e| {
+            DoorcamError::component("wal", &format!("Failed to read data length: {}", e))
+        })?;
+        let data_len = u32::from_le_bytes(len_buf) as usize;
+
+        // Read JPEG data
+        let mut data = vec![0u8; data_len];
+        self.file.read_exact(&mut data).await.map_err(|e| {
+            DoorcamError::component("wal", &format!("Failed to read frame data: {}", e))
+        })?;
+
+        let frame = FrameData::new(
+            frame_id,
+            timestamp,
+            data,
+            0, // width unknown
+            0, // height unknown
+            crate::frame::FrameFormat::Mjpeg,
         );
 
-        let mut frames = Vec::with_capacity(frame_count as usize);
+        Ok(Some(frame))
+    }
 
-        // Read frames
-        loop {
-            // Read timestamp (8 bytes)
-            let mut timestamp_buf = [0u8; 8];
-            match file.read_exact(&mut timestamp_buf).await {
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(e) => {
-                    return Err(DoorcamError::component(
-                        "wal",
-                        &format!("Failed to read timestamp: {}", e),
-                    ))
-                }
-            }
-            let timestamp_nanos = u64::from_le_bytes(timestamp_buf);
-            let timestamp = SystemTime::UNIX_EPOCH + Duration::from_nanos(timestamp_nanos);
-
-            // Read frame ID (8 bytes)
-            let mut id_buf = [0u8; 8];
-            file.read_exact(&mut id_buf).await.map_err(|e| {
-                DoorcamError::component("wal", &format!("Failed to read frame ID: {}", e))
-            })?;
-            let frame_id = u64::from_le_bytes(id_buf);
-
-            // Read data length (4 bytes)
-            let mut len_buf = [0u8; 4];
-            file.read_exact(&mut len_buf).await.map_err(|e| {
-                DoorcamError::component("wal", &format!("Failed to read data length: {}", e))
-            })?;
-            let data_len = u32::from_le_bytes(len_buf) as usize;
-
-            // Read JPEG data
-            let mut data = vec![0u8; data_len];
-            file.read_exact(&mut data).await.map_err(|e| {
-                DoorcamError::component("wal", &format!("Failed to read frame data: {}", e))
-            })?;
-
-            // Create frame (we don't know original width/height/format, but they're not needed for encoding)
-            let frame = FrameData::new(
-                frame_id,
-                timestamp,
-                data,
-                0, // width unknown
-                0, // height unknown
-                crate::frame::FrameFormat::Mjpeg,
-            );
-
-            frames.push(frame);
-        }
-
-        info!("Read {} frames from WAL", frames.len());
-        Ok(frames)
+    /// Path for logging
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 }
 

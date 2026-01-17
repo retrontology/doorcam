@@ -251,10 +251,34 @@ impl CameraInterface {
         let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now();
 
+        let data = map.as_slice();
+        if data.len() < 4 || data[0..2] != [0xFF, 0xD8] {
+            warn!(
+                "Dropping MJPEG frame {}: missing SOI marker (len={})",
+                frame_id,
+                data.len()
+            );
+            return Ok(());
+        }
+
+        let eoi_pos = match data.windows(2).rposition(|w| w == [0xFF, 0xD9]) {
+            Some(pos) => pos,
+            None => {
+                warn!(
+                    "Dropping MJPEG frame {}: missing EOI marker (len={})",
+                    frame_id,
+                    data.len()
+                );
+                return Ok(());
+            }
+        };
+
+        let trimmed = data[..eoi_pos + 2].to_vec();
+
         let frame_data = FrameData::new(
             frame_id,
             timestamp,
-            map.as_slice().to_vec(),
+            trimmed,
             width,
             height,
             FrameFormat::Mjpeg,

@@ -10,7 +10,7 @@ use doorcam::{
     config::{CaptureConfig, DoorcamConfig, Rotation as CaptureRotation},
     error::DoorcamError,
     frame::{FrameData, ProcessedFrame, Rotation as FrameRotation},
-    wal::WalReader,
+    wal::WalFrameReader,
 };
 use serde::Serialize;
 use tokio::fs;
@@ -157,42 +157,89 @@ async fn process_wal(
         .unwrap_or("unknown")
         .to_string();
 
-    info!("Reading WAL {} (event {})", wal_path.display(), event_id);
+    let mut outputs = WalOutputs::default();
+    let event_dir = output_base.join(&event_id);
 
-    let reader = WalReader::new(wal_path.to_path_buf());
-    let frames = reader
-        .read_all_frames()
+    let frames_dir = if actions.images {
+        Some(prepare_frames_dir(&event_dir, overwrite).await?)
+    } else {
+        None
+    };
+
+    let video_path = if actions.video {
+        let path = output_base.join(format!("{}.mp4", event_id));
+        if path.exists() && !overwrite {
+            return Err(anyhow!(
+                "Video file {} exists (use --overwrite to replace)",
+                path.display()
+            ));
+        }
+        Some(path)
+    } else {
+        None
+    };
+
+    let timezone = if actions.images {
+        Some(resolve_timestamp_timezone(
+            &capture_config.timestamp_timezone,
+        ))
+    } else {
+        None
+    };
+
+    let mut reader = WalFrameReader::open(wal_path.to_path_buf())
         .await
-        .with_context(|| format!("Failed to read WAL {}", wal_path.display()))?;
+        .with_context(|| format!("Failed to open WAL {}", wal_path.display()))?;
 
-    if frames.is_empty() {
+    info!(
+        "Reading {} frames from WAL {}",
+        reader.frame_count(),
+        wal_path.display()
+    );
+
+    let (frame_count, start_ts, end_ts) = if actions.video {
+        #[cfg(target_os = "linux")]
+        {
+            stream_wal_with_video(
+                &mut reader,
+                frames_dir.as_deref(),
+                timezone.as_ref(),
+                video_path.as_ref().unwrap(),
+                capture_config,
+                overwrite,
+            )
+            .await?
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            return Err(anyhow!(
+                "Video encoding not available (requires video_encoding feature on Linux)"
+            ));
+        }
+    } else {
+        stream_wal_without_video(
+            &mut reader,
+            frames_dir.as_deref(),
+            timezone.as_ref(),
+            capture_config,
+            overwrite,
+        )
+        .await?
+    };
+
+    if frame_count == 0 {
         warn!("WAL {} contained no frames; skipping", wal_path.display());
         return Ok(());
     }
 
-    let mut outputs = WalOutputs::default();
-    let event_dir = output_base.join(&event_id);
-
-    if actions.images {
-        let frames_dir = extract_images(&frames, &event_dir, capture_config, overwrite).await?;
-        outputs.images_dir = Some(frames_dir.display().to_string());
+    if let Some(dir) = &frames_dir {
+        outputs.images_dir = Some(dir.display().to_string());
     }
 
-    if actions.video {
-        let video_path = output_base.join(format!("{}.mp4", event_id));
-        create_video_from_frames(&frames, &video_path, capture_config, overwrite).await?;
-        outputs.video_path = Some(video_path.display().to_string());
+    if let Some(path) = &video_path {
+        outputs.video_path = Some(path.display().to_string());
     }
-
-    // Build metadata
-    let start_ts = frames
-        .first()
-        .map(|f| f.timestamp)
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    let end_ts = frames
-        .last()
-        .map(|f| f.timestamp)
-        .unwrap_or(SystemTime::UNIX_EPOCH);
 
     let metadata_path = output_base
         .join("metadata")
@@ -201,9 +248,9 @@ async fn process_wal(
     let mut metadata = WalExportMetadata {
         event_id: event_id.clone(),
         wal_path: wal_path.display().to_string(),
-        frame_count: frames.len(),
-        start_timestamp: DateTime::<Utc>::from(start_ts),
-        end_timestamp: DateTime::<Utc>::from(end_ts),
+        frame_count,
+        start_timestamp: DateTime::<Utc>::from(start_ts.unwrap_or(SystemTime::UNIX_EPOCH)),
+        end_timestamp: DateTime::<Utc>::from(end_ts.unwrap_or(SystemTime::UNIX_EPOCH)),
         outputs,
     };
 
@@ -255,53 +302,6 @@ async fn collect_wal_paths(input: &Path) -> Result<Vec<PathBuf>> {
         "Input {} is neither a WAL file nor a directory",
         input.display()
     ))
-}
-
-async fn extract_images(
-    frames: &[FrameData],
-    event_dir: &Path,
-    config: &CaptureConfig,
-    overwrite: bool,
-) -> Result<PathBuf> {
-    let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
-    let frames_dir = event_dir.join("frames");
-
-    if frames_dir.exists() && !overwrite {
-        return Err(anyhow!(
-            "Frames directory {} already exists (use --overwrite to replace)",
-            frames_dir.display()
-        ));
-    }
-
-    fs::create_dir_all(&frames_dir)
-        .await
-        .with_context(|| format!("Failed to create frames directory {}", frames_dir.display()))?;
-
-    for frame in frames {
-        let timestamp = DateTime::<Utc>::from(frame.timestamp).with_timezone(&timezone);
-        let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
-        let file_path = frames_dir.join(&filename);
-
-        if file_path.exists() && !overwrite {
-            warn!("Skipping existing frame {}", file_path.display());
-            continue;
-        }
-
-        let jpeg_data = prepare_jpeg(frame, config)
-            .await
-            .with_context(|| format!("Failed to prepare JPEG for frame {}", frame.id))?;
-
-        fs::write(&file_path, &*jpeg_data)
-            .await
-            .with_context(|| format!("Failed to write {}", file_path.display()))?;
-    }
-
-    info!(
-        "Extracted {} JPEG files to {}",
-        frames.len(),
-        frames_dir.display()
-    );
-    Ok(frames_dir)
 }
 
 async fn write_metadata(
@@ -451,19 +451,14 @@ fn resolve_timestamp_timezone(tz_name: &str) -> Tz {
 }
 
 #[cfg(target_os = "linux")]
-async fn create_video_from_frames(
-    frames: &[FrameData],
+async fn stream_wal_with_video(
+    reader: &mut WalFrameReader,
+    frames_dir: Option<&Path>,
+    timezone: Option<&Tz>,
     video_path: &Path,
     config: &CaptureConfig,
     overwrite: bool,
-) -> Result<()> {
-    if video_path.exists() && !overwrite {
-        return Err(anyhow!(
-            "Video file {} exists (use --overwrite to replace)",
-            video_path.display()
-        ));
-    }
-
+) -> Result<(usize, Option<SystemTime>, Option<SystemTime>)> {
     // Initialize GStreamer if not already done
     gstreamer::init().map_err(|e| {
         DoorcamError::component("waltool", &format!("Failed to initialize GStreamer: {}", e))
@@ -482,17 +477,30 @@ async fn create_video_from_frames(
         video_path.to_string_lossy()
     );
 
-    encode_frames_with_pipeline("waltool", &pipeline_desc, frames, video_path, config).await
+    stream_wal_with_pipeline(
+        "waltool",
+        &pipeline_desc,
+        reader,
+        frames_dir,
+        timezone,
+        video_path,
+        config,
+        overwrite,
+    )
+    .await
 }
 
 #[cfg(target_os = "linux")]
-async fn encode_frames_with_pipeline(
+async fn stream_wal_with_pipeline(
     label: &str,
     pipeline_desc: &str,
-    frames: &[FrameData],
+    reader: &mut WalFrameReader,
+    frames_dir: Option<&Path>,
+    timezone: Option<&Tz>,
     video_path: &Path,
     config: &CaptureConfig,
-) -> Result<()> {
+    overwrite: bool,
+) -> Result<(usize, Option<SystemTime>, Option<SystemTime>)> {
     let pipeline = gstreamer::parse::launch(pipeline_desc)
         .map_err(|e| {
             DoorcamError::component(
@@ -534,30 +542,56 @@ async fn encode_frames_with_pipeline(
         )
     })?;
 
-    let base_time = if let Some(first_frame) = frames.first() {
-        first_frame
-            .timestamp
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_nanos() as u64
-    } else {
-        0
+    let mut frame_count = 0usize;
+    let (start_ts, mut current_frame) = match reader.next_frame().await? {
+        Some(frame) => (Some(frame.timestamp), frame),
+        None => {
+            appsrc.end_of_stream().map_err(|e| {
+                DoorcamError::component(
+                    "waltool",
+                    &format!("[{}] Failed to signal EOS: {:?}", label, e),
+                )
+            })?;
+            return Ok((0, None, None));
+        }
     };
 
-    info!(
-        "[{}] Encoding {} frames to {}",
-        label,
-        frames.len(),
-        video_path.display()
-    );
+    let base_time = current_frame
+        .timestamp
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos() as u64;
 
-    for (frame_index, frame) in frames.iter().enumerate() {
-        let jpeg_data = prepare_jpeg(frame, config).await.map_err(|e| {
+    info!("[{}] Encoding frames to {}", label, video_path.display());
+
+    loop {
+        let next_frame = reader.next_frame().await?;
+        let next_duration = if let Some(next) = &next_frame {
+            let next_ns = next
+                .timestamp
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos() as u64;
+            let frame_ns = current_frame
+                .timestamp
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos() as u64;
+            next_ns.saturating_sub(frame_ns)
+        } else {
+            1_000_000_000 / 30
+        };
+
+        let jpeg_data = prepare_jpeg(&current_frame, config).await.map_err(|e| {
             DoorcamError::component(
                 "waltool",
                 &format!("[{}] Frame processing failed: {}", label, e),
             )
         })?;
+
+        if let (Some(dir), Some(tz)) = (frames_dir, timezone) {
+            write_frame_jpeg(&jpeg_data, current_frame.timestamp, dir, tz, overwrite).await?;
+        }
 
         let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len()).map_err(|e| {
             DoorcamError::component(
@@ -577,24 +611,12 @@ async fn encode_frames_with_pipeline(
             map.copy_from_slice(&jpeg_data);
         }
 
-        let frame_ns = frame
+        let frame_ns = current_frame
             .timestamp
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_nanos() as u64;
         let relative_ns = frame_ns.saturating_sub(base_time);
-
-        let next_duration = if frame_index + 1 < frames.len() {
-            let next_frame = &frames[frame_index + 1];
-            let next_ns = next_frame
-                .timestamp
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_nanos() as u64;
-            next_ns.saturating_sub(frame_ns)
-        } else {
-            1_000_000_000 / 30
-        };
 
         buffer
             .get_mut()
@@ -611,6 +633,13 @@ async fn encode_frames_with_pipeline(
                 &format!("[{}] Failed to push buffer: {:?}", label, e),
             )
         })?;
+
+        frame_count += 1;
+
+        match next_frame {
+            Some(next) => current_frame = next,
+            None => break,
+        }
     }
 
     appsrc.end_of_stream().map_err(|e| {
@@ -648,23 +677,217 @@ async fn encode_frames_with_pipeline(
         )
     })?;
 
+    let end_ts = Some(current_frame.timestamp);
+
     info!(
         "[{}] Video encoding completed: {} frames -> {}",
         label,
-        frames.len(),
+        frame_count,
         video_path.display()
     );
-    Ok(())
+    Ok((frame_count, start_ts, end_ts))
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn create_video_from_frames(
-    _frames: &[FrameData],
+async fn stream_wal_with_video(
+    _reader: &mut WalFrameReader,
+    _frames_dir: Option<&Path>,
+    _timezone: Option<&Tz>,
     _video_path: &Path,
     _config: &CaptureConfig,
     _overwrite: bool,
-) -> Result<()> {
+) -> Result<(usize, Option<SystemTime>, Option<SystemTime>)> {
     Err(anyhow!(
         "Video encoding not available (requires video_encoding feature on Linux)"
     ))
+}
+
+async fn stream_wal_without_video(
+    reader: &mut WalFrameReader,
+    frames_dir: Option<&Path>,
+    timezone: Option<&Tz>,
+    config: &CaptureConfig,
+    overwrite: bool,
+) -> Result<(usize, Option<SystemTime>, Option<SystemTime>)> {
+    let mut frame_count = 0usize;
+    let mut start_ts = None;
+    let mut end_ts = None;
+
+    while let Some(frame) = reader.next_frame().await? {
+        let jpeg_data = if frames_dir.is_some() {
+            Some(
+                prepare_jpeg(&frame, config)
+                    .await
+                    .with_context(|| format!("Failed to prepare JPEG for frame {}", frame.id))?,
+            )
+        } else {
+            None
+        };
+
+        if let (Some(dir), Some(tz), Some(jpeg)) = (frames_dir, timezone, jpeg_data.as_ref()) {
+            write_frame_jpeg(jpeg, frame.timestamp, dir, tz, overwrite).await?;
+        }
+
+        if start_ts.is_none() {
+            start_ts = Some(frame.timestamp);
+        }
+        end_ts = Some(frame.timestamp);
+        frame_count += 1;
+    }
+
+    if let Some(dir) = frames_dir {
+        info!("Extracted {} JPEG files to {}", frame_count, dir.display());
+    }
+
+    Ok((frame_count, start_ts, end_ts))
+}
+
+async fn prepare_frames_dir(event_dir: &Path, overwrite: bool) -> Result<PathBuf> {
+    let frames_dir = event_dir.join("frames");
+
+    if frames_dir.exists() && !overwrite {
+        return Err(anyhow!(
+            "Frames directory {} already exists (use --overwrite to replace)",
+            frames_dir.display()
+        ));
+    }
+
+    fs::create_dir_all(&frames_dir)
+        .await
+        .with_context(|| format!("Failed to create frames directory {}", frames_dir.display()))?;
+
+    Ok(frames_dir)
+}
+
+async fn write_frame_jpeg(
+    jpeg_data: &[u8],
+    timestamp: SystemTime,
+    frames_dir: &Path,
+    timezone: &Tz,
+    overwrite: bool,
+) -> Result<()> {
+    let timestamp = DateTime::<Utc>::from(timestamp).with_timezone(timezone);
+    let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
+    let file_path = frames_dir.join(&filename);
+
+    if file_path.exists() && !overwrite {
+        warn!("Skipping existing frame {}", file_path.display());
+        return Ok(());
+    }
+
+    fs::write(&file_path, jpeg_data)
+        .await
+        .with_context(|| format!("Failed to write {}", file_path.display()))?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use doorcam::frame::FrameFormat;
+    use doorcam::wal::WalWriter;
+    use tempfile::TempDir;
+
+    async fn write_test_wal(
+        wal_dir: &Path,
+        event_id: &str,
+        timestamps: &[SystemTime],
+    ) -> Result<PathBuf> {
+        let mut writer = WalWriter::new(event_id.to_string(), wal_dir)
+            .await
+            .context("Failed to create WAL writer")?;
+
+        for (idx, timestamp) in timestamps.iter().enumerate() {
+            let frame = FrameData::new(
+                idx as u64,
+                *timestamp,
+                vec![0u8; 128],
+                640,
+                480,
+                FrameFormat::Mjpeg,
+            );
+            writer
+                .append_frame(&frame)
+                .await
+                .context("Failed to append frame")?;
+        }
+
+        writer.close().await.context("Failed to close WAL")
+    }
+
+    #[tokio::test]
+    async fn stream_wal_without_video_returns_counts_and_timestamps() -> Result<()> {
+        let temp_dir = TempDir::new().context("Failed to create temp dir")?;
+        let wal_dir = temp_dir.path().join("wal");
+        fs::create_dir_all(&wal_dir)
+            .await
+            .context("Failed to create WAL dir")?;
+
+        let timestamps = vec![
+            SystemTime::UNIX_EPOCH + Duration::from_millis(1_000),
+            SystemTime::UNIX_EPOCH + Duration::from_millis(2_000),
+            SystemTime::UNIX_EPOCH + Duration::from_millis(3_000),
+        ];
+
+        let wal_path = write_test_wal(&wal_dir, "event-1", &timestamps).await?;
+        let mut reader = WalFrameReader::open(wal_path).await?;
+        let capture_config = DoorcamConfig::default().capture;
+
+        let (frame_count, start_ts, end_ts) =
+            stream_wal_without_video(&mut reader, None, None, &capture_config, true).await?;
+
+        assert_eq!(frame_count, 3);
+        assert_eq!(start_ts, Some(timestamps[0]));
+        assert_eq!(end_ts, Some(timestamps[2]));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stream_wal_without_video_writes_images() -> Result<()> {
+        let temp_dir = TempDir::new().context("Failed to create temp dir")?;
+        let wal_dir = temp_dir.path().join("wal");
+        fs::create_dir_all(&wal_dir)
+            .await
+            .context("Failed to create WAL dir")?;
+
+        let event_dir = temp_dir.path().join("event-2");
+        let frames_dir = prepare_frames_dir(&event_dir, true).await?;
+
+        let timestamps = vec![
+            SystemTime::UNIX_EPOCH + Duration::from_millis(10),
+            SystemTime::UNIX_EPOCH + Duration::from_millis(20),
+        ];
+
+        let wal_path = write_test_wal(&wal_dir, "event-2", &timestamps).await?;
+        let mut reader = WalFrameReader::open(wal_path).await?;
+        let mut capture_config = DoorcamConfig::default().capture;
+        capture_config.timestamp_overlay = false;
+        capture_config.rotation = None;
+        let timezone = resolve_timestamp_timezone(&capture_config.timestamp_timezone);
+
+        let (frame_count, start_ts, end_ts) = stream_wal_without_video(
+            &mut reader,
+            Some(&frames_dir),
+            Some(&timezone),
+            &capture_config,
+            true,
+        )
+        .await?;
+
+        assert_eq!(frame_count, 2);
+        assert_eq!(start_ts, Some(timestamps[0]));
+        assert_eq!(end_ts, Some(timestamps[1]));
+
+        let mut files = std::fs::read_dir(&frames_dir)
+            .with_context(|| format!("Failed to read {}", frames_dir.display()))?;
+        let mut count = 0usize;
+        while files.next().transpose()?.is_some() {
+            count += 1;
+        }
+        assert_eq!(count, 2);
+
+        Ok(())
+    }
 }

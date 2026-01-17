@@ -1,7 +1,6 @@
 use crate::{
     config::CaptureConfig,
     error::{DoorcamError, Result},
-    frame::FrameData,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -62,19 +61,14 @@ pub(crate) async fn generate_video_from_wal(
 
     info!("Generating video file from WAL: {}", video_path.display());
 
-    let reader = crate::wal::WalReader::new(job.wal_path.clone());
-    let frames = reader.read_all_frames().await?;
+    let mut reader = crate::wal::WalFrameReader::open(job.wal_path.clone()).await?;
+    let wal_frame_count = reader.frame_count();
 
-    info!("Read {} frames from WAL for encoding", frames.len());
-
-    if config.keep_images {
-        info!("Extracting {} JPEG files from WAL", frames.len());
-        extract_jpegs_from_frames(&frames, &job.capture_dir, config).await?;
-    }
+    info!("Read {} frames from WAL for encoding", wal_frame_count);
 
     #[cfg(target_os = "linux")]
     {
-        create_video_gstreamer_from_frames(&frames, &video_path, config).await?;
+        create_video_gstreamer_from_wal(&mut reader, &job.capture_dir, &video_path, config).await?;
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -89,58 +83,15 @@ pub(crate) async fn generate_video_from_wal(
         warn!("Failed to delete WAL file: {}", e);
     }
 
-    info!(
-        "Video file created: {} ({} frames encoded)",
-        video_path.display(),
-        frames.len()
-    );
+    info!("Video file created: {}", video_path.display());
     Ok(())
 }
 
-/// Extract individual JPEG files from frames
-pub(crate) async fn extract_jpegs_from_frames(
-    frames: &[FrameData],
-    capture_dir: &Path,
-    config: &CaptureConfig,
-) -> Result<()> {
-    let timezone = resolve_timestamp_timezone(&config.timestamp_timezone);
-
-    let frames_dir = capture_dir.join("frames");
-    tokio::fs::create_dir_all(&frames_dir).await.map_err(|e| {
-        DoorcamError::component(
-            "video_capture",
-            &format!("Failed to create frames directory: {}", e),
-        )
-    })?;
-
-    for frame in frames {
-        let timestamp =
-            chrono::DateTime::<chrono::Utc>::from(frame.timestamp).with_timezone(&timezone);
-        let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
-        let file_path = frames_dir.join(&filename);
-
-        let jpeg_data = prepare_jpeg(frame, config).await.map_err(|e| {
-            DoorcamError::component("video_capture", &format!("Frame processing failed: {}", e))
-        })?;
-
-        tokio::fs::write(&file_path, &*jpeg_data)
-            .await
-            .map_err(|e| {
-                DoorcamError::component(
-                    "video_capture",
-                    &format!("Failed to write JPEG file: {}", e),
-                )
-            })?;
-    }
-
-    info!("Extracted {} JPEG files", frames.len());
-    Ok(())
-}
-
-/// Create video using GStreamer from frames
+/// Create video using GStreamer from a WAL stream
 #[cfg(target_os = "linux")]
-pub(crate) async fn create_video_gstreamer_from_frames(
-    frames: &[FrameData],
+pub(crate) async fn create_video_gstreamer_from_wal(
+    reader: &mut crate::wal::WalFrameReader,
+    capture_dir: &Path,
     video_path: &Path,
     config: &CaptureConfig,
 ) -> Result<()> {
@@ -164,15 +115,26 @@ pub(crate) async fn create_video_gstreamer_from_frames(
         video_path.to_string_lossy()
     );
 
-    encode_frames_with_pipeline("software", &sw_pipeline_desc, frames, video_path, config).await
+    encode_wal_with_pipeline(
+        "software",
+        &sw_pipeline_desc,
+        reader,
+        capture_dir,
+        video_path,
+        config,
+    )
+    .await?;
+
+    Ok(())
 }
 
 /// Encode frames using a provided GStreamer pipeline description (software path).
 #[cfg(target_os = "linux")]
-pub(crate) async fn encode_frames_with_pipeline(
+pub(crate) async fn encode_wal_with_pipeline(
     label: &str,
     pipeline_desc: &str,
-    frames: &[FrameData],
+    reader: &mut crate::wal::WalFrameReader,
+    capture_dir: &Path,
     video_path: &Path,
     config: &CaptureConfig,
 ) -> Result<()> {
@@ -227,87 +189,121 @@ pub(crate) async fn encode_frames_with_pipeline(
     })?;
 
     info!("Started GStreamer encoding pipeline ({})", label);
+    let mut frames_dir = None;
+    let mut timezone = None;
+    if config.keep_images {
+        let dir = capture_dir.join("frames");
+        tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+            DoorcamError::component(
+                "video_capture",
+                &format!("Failed to create frames directory: {}", e),
+            )
+        })?;
+        frames_dir = Some(dir);
+        timezone = Some(resolve_timestamp_timezone(&config.timestamp_timezone));
+        info!(
+            "[{}] Extracting JPEG files to {}",
+            label,
+            capture_dir.join("frames").display()
+        );
+    }
 
-    let base_time = if let Some(first_frame) = frames.first() {
-        first_frame
-            .timestamp
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_nanos() as u64
-    } else {
-        0
-    };
+    let mut frame_index: u32 = 0;
+    let mut prev_frame = reader.next_frame().await?;
 
     info!(
-        "[{}] Encoding {} frames to {}",
+        "[{}] Encoding frames from WAL {} to {}",
         label,
-        frames.len(),
+        reader.path().display(),
         video_path.display()
     );
 
-    for (frame_index, frame) in frames.iter().enumerate() {
-        let jpeg_data = prepare_jpeg(frame, config).await.map_err(|e| {
-            DoorcamError::component(
-                "video_capture",
-                &format!("[{}] Frame processing failed: {}", label, e),
-            )
-        })?;
-
-        let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len()).map_err(|e| {
-            DoorcamError::component(
-                "video_capture",
-                &format!("[{}] Failed to create buffer: {}", label, e),
-            )
-        })?;
-
-        {
-            let buffer_ref = buffer.get_mut().unwrap();
-            let mut map = buffer_ref.map_writable().map_err(|e| {
-                DoorcamError::component(
-                    "video_capture",
-                    &format!("[{}] Failed to map buffer: {}", label, e),
-                )
-            })?;
-            map.copy_from_slice(&jpeg_data);
-        }
-
-        let frame_ns = frame
+    if let Some(mut current_frame) = prev_frame.take() {
+        let base_time = current_frame
             .timestamp
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_nanos() as u64;
-        let relative_ns = frame_ns.saturating_sub(base_time);
 
-        let next_duration = if frame_index + 1 < frames.len() {
-            let next_frame = &frames[frame_index + 1];
-            let next_ns = next_frame
+        loop {
+            let next_frame = reader.next_frame().await?;
+            let next_duration = if let Some(next) = &next_frame {
+                let next_ns = next
+                    .timestamp
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_nanos() as u64;
+                let frame_ns = current_frame
+                    .timestamp
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_nanos() as u64;
+                next_ns.saturating_sub(frame_ns)
+            } else {
+                1_000_000_000 / 30
+            };
+
+            let jpeg_data = prepare_jpeg(&current_frame, config).await.map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Frame processing failed: {}", label, e),
+                )
+            })?;
+
+            if let (Some(dir), Some(tz)) = (&frames_dir, &timezone) {
+                write_frame_jpeg(&jpeg_data, current_frame.timestamp, dir, tz).await?;
+            }
+
+            let mut buffer = gstreamer::Buffer::with_size(jpeg_data.len()).map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to create buffer: {}", label, e),
+                )
+            })?;
+
+            {
+                let buffer_ref = buffer.get_mut().unwrap();
+                let mut map = buffer_ref.map_writable().map_err(|e| {
+                    DoorcamError::component(
+                        "video_capture",
+                        &format!("[{}] Failed to map buffer: {}", label, e),
+                    )
+                })?;
+                map.copy_from_slice(&jpeg_data);
+            }
+
+            let frame_ns = current_frame
                 .timestamp
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_nanos() as u64;
-            next_ns.saturating_sub(frame_ns)
-        } else {
-            1_000_000_000 / 30
-        };
+            let relative_ns = frame_ns.saturating_sub(base_time);
 
-        buffer
-            .get_mut()
-            .unwrap()
-            .set_pts(gstreamer::ClockTime::from_nseconds(relative_ns));
-        buffer
-            .get_mut()
-            .unwrap()
-            .set_duration(gstreamer::ClockTime::from_nseconds(next_duration));
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_pts(gstreamer::ClockTime::from_nseconds(relative_ns));
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_duration(gstreamer::ClockTime::from_nseconds(next_duration));
 
-        appsrc.push_buffer(buffer).map_err(|e| {
-            DoorcamError::component(
-                "video_capture",
-                &format!("[{}] Failed to push buffer: {:?}", label, e),
-            )
-        })?;
+            appsrc.push_buffer(buffer).map_err(|e| {
+                DoorcamError::component(
+                    "video_capture",
+                    &format!("[{}] Failed to push buffer: {:?}", label, e),
+                )
+            })?;
 
-        if frame_index % 30 == 0 && frame_index > 0 {
-            debug!("[{}] Encoded {} frames", label, frame_index);
+            if frame_index % 30 == 0 && frame_index > 0 {
+                debug!("[{}] Encoded {} frames", label, frame_index);
+            }
+            frame_index += 1;
+
+            match next_frame {
+                Some(next) => current_frame = next,
+                None => break,
+            }
         }
     }
 
@@ -348,8 +344,28 @@ pub(crate) async fn encode_frames_with_pipeline(
 
     info!(
         "[{}] GStreamer video encoding completed: {} frames",
-        label,
-        frames.len()
+        label, frame_index
     );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn write_frame_jpeg(
+    jpeg_data: &[u8],
+    timestamp: SystemTime,
+    frames_dir: &Path,
+    timezone: &chrono_tz::Tz,
+) -> Result<()> {
+    let timestamp = chrono::DateTime::<chrono::Utc>::from(timestamp).with_timezone(timezone);
+    let filename = format!("{}.jpg", timestamp.format("%Y%m%d_%H%M%S_%3f"));
+    let file_path = frames_dir.join(&filename);
+
+    tokio::fs::write(&file_path, jpeg_data).await.map_err(|e| {
+        DoorcamError::component(
+            "video_capture",
+            &format!("Failed to write JPEG file: {}", e),
+        )
+    })?;
+
     Ok(())
 }

@@ -87,7 +87,7 @@ async fn test_capture_completion() {
 
     let now = SystemTime::now();
     for i in 0..20 {
-        let frame = create_test_frame(i, now + Duration::from_millis(50 * i));
+        let frame = create_test_frame(i, now - Duration::from_millis(50 * (20 - i)));
         ring_buffer.push_frame(frame).await;
     }
 
@@ -98,7 +98,7 @@ async fn test_capture_completion() {
         ring_buffer,
     );
 
-    let motion_time = now + Duration::from_millis(500);
+    let motion_time = now;
     capture.handle_motion_detected(motion_time).await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
