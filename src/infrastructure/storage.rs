@@ -396,6 +396,9 @@ impl EventStorage {
         // Load existing events from filesystem
         self.scan_and_register_existing_events().await?;
 
+        // Start periodic rescan to catch video-only events
+        self.start_rescan_scheduler().await?;
+
         // Subscribe to capture completion events
         let mut event_receiver = self.event_bus.subscribe();
         let storage_system = Arc::new(self.clone());
@@ -476,6 +479,9 @@ impl EventStorage {
                 if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
                     // Check if directory name matches timestamp pattern (YYYYMMDD_HHMMSS_mmm)
                     if self.is_valid_event_directory_name(dir_name) {
+                        if self.is_event_registered(dir_name).await {
+                            continue;
+                        }
                         match self.register_existing_event(&path).await {
                             Ok(_) => {
                                 registered_count += 1;
@@ -487,11 +493,43 @@ impl EventStorage {
                         }
                     }
                 }
+            } else if path.is_file() {
+                if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                    if extension.eq_ignore_ascii_case("mp4") {
+                        if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            if self.is_valid_event_directory_name(file_stem) {
+                                if self.is_event_registered(file_stem).await {
+                                    continue;
+                                }
+                                match self.register_completed_capture(file_stem, 0).await {
+                                    Ok(_) => {
+                                        registered_count += 1;
+                                        debug!(
+                                            "Registered existing video-only event: {}",
+                                            file_stem
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to register existing video-only event {}: {}",
+                                            file_stem, e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         info!("Registered {} existing events", registered_count);
         Ok(())
+    }
+
+    async fn is_event_registered(&self, event_id: &str) -> bool {
+        let registry = self.event_registry.read().await;
+        registry.events.contains_key(event_id)
     }
 
     /// Check if directory name matches expected timestamp pattern
@@ -916,6 +954,26 @@ impl EventStorage {
         Ok(())
     }
 
+    async fn start_rescan_scheduler(&self) -> Result<()> {
+        info!("Starting rescan scheduler for existing events");
+
+        let storage_system = Arc::new(self.clone());
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 1 hour
+            interval.tick().await; // Skip first immediate tick
+
+            loop {
+                interval.tick().await;
+
+                if let Err(e) = storage_system.scan_and_register_existing_events().await {
+                    warn!("Periodic rescan failed: {}", e);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
     /// Run cleanup operation to remove old events
     pub async fn run_cleanup(&self) -> Result<CleanupResult> {
         // Check if cleanup is already running
@@ -1078,7 +1136,7 @@ impl EventStorage {
             }
         }
 
-        // Calculate actual size before deletion (directory + MP4 file + metadata file)
+        // Calculate actual size before deletion (directory + MP4 + metadata + WAL)
         let dir_size = if metadata.directory_path.exists() {
             let (_, size) = self
                 .calculate_directory_stats(&metadata.directory_path)
@@ -1110,20 +1168,15 @@ impl EventStorage {
             0
         };
 
-        let actual_size = dir_size + mp4_size + metadata_size;
+        // Add WAL file size
+        let wal_path = capture_path.join("wal").join(format!("{}.wal", event_id));
+        let wal_size = if wal_path.exists() {
+            fs::metadata(&wal_path).await.map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
 
-        // Create backup of metadata before deletion (for recovery purposes)
-        let backup_metadata = serde_json::to_string_pretty(&metadata).map_err(|e| {
-            DoorcamError::component(
-                "event_storage",
-                &format!("Failed to serialize metadata: {}", e),
-            )
-        })?;
-
-        let backup_path = metadata.directory_path.with_extension("deleted.json");
-        if let Err(e) = fs::write(&backup_path, backup_metadata).await {
-            warn!("Failed to create deletion backup for {}: {}", event_id, e);
-        }
+        let actual_size = dir_size + mp4_size + metadata_size + wal_size;
 
         // Remove MP4 file from root captures directory
         let capture_path = PathBuf::from(&self.capture_config.path);
@@ -1136,6 +1189,18 @@ impl EventStorage {
                 )
             })?;
             debug!("Deleted MP4 file: {}", mp4_path.display());
+        }
+
+        // Remove WAL file from capture WAL directory
+        let wal_path = capture_path.join("wal").join(format!("{}.wal", event_id));
+        if wal_path.exists() {
+            fs::remove_file(&wal_path).await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to delete WAL file {}: {}", wal_path.display(), e),
+                )
+            })?;
+            debug!("Deleted WAL file: {}", wal_path.display());
         }
 
         // Remove metadata file from shared metadata directory
