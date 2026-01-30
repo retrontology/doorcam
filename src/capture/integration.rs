@@ -22,8 +22,13 @@ impl VideoCaptureIntegration {
         event_bus: Arc<EventBus>,
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
-        let capture =
-            VideoCapture::new(config.clone(), event_config.clone(), camera_fps, event_bus, ring_buffer);
+        let capture = VideoCapture::new(
+            config.clone(),
+            event_config.clone(),
+            camera_fps,
+            event_bus,
+            ring_buffer,
+        );
 
         Self {
             capture,

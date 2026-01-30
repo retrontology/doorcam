@@ -68,14 +68,8 @@ pub(crate) async fn generate_video_from_wal(
     {
         let wal_fps = reader.fps();
         let fps = if wal_fps > 0 { wal_fps } else { job.camera_fps }.max(1);
-        create_video_ffmpeg_from_wal(
-            &mut reader,
-            &job.capture_dir,
-            &video_path,
-            config,
-            fps,
-        )
-        .await?;
+        create_video_ffmpeg_from_wal(&mut reader, &job.capture_dir, &video_path, config, fps)
+            .await?;
     }
 
     #[cfg(not(target_os = "linux"))]

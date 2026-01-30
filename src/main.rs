@@ -186,41 +186,63 @@ fn init_logging(args: &Args) -> Result<()> {
         "warn"
     };
 
-    // Create environment filter
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("doorcam={}", log_level)));
+    // Create environment filter (allow RUST_LOG to override)
+    let default_filter = if args.debug {
+        // Keep debug detail, but quiet the highest-frequency targets by default.
+        "doorcam=debug,\
+doorcam::analyzer::motion=info,\
+doorcam::analyzer::orchestrator=info,\
+doorcam::core::events=info,\
+doorcam::display::controller=info"
+            .to_string()
+    } else {
+        format!("doorcam={}", log_level)
+    };
+
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
     // Configure format based on options
-    let fmt_layer = match args.log_format.as_deref() {
-        Some("json") => fmt::layer()
+    let default_format = if args.debug { "compact" } else { "pretty" };
+    let fmt_layer = match args.log_format.as_deref().unwrap_or(default_format) {
+        "json" => fmt::layer()
             .json()
             .with_target(true)
             .with_thread_ids(true)
             .with_file(true)
             .with_line_number(true)
             .boxed(),
-        Some("compact") => fmt::layer()
+        "compact" => fmt::layer()
             .compact()
-            .with_target(false)
+            .with_target(true)
             .with_thread_ids(false)
             .with_file(false)
             .with_line_number(false)
             .boxed(),
-        Some("pretty") | None => fmt::layer()
+        "pretty" => fmt::layer()
             .pretty()
             .with_target(true)
             .with_thread_ids(args.debug)
             .with_file(args.debug)
             .with_line_number(args.debug)
             .boxed(),
-        Some(format) => {
+        format => {
             eprintln!("Warning: Unknown log format '{}', using default", format);
-            fmt::layer()
-                .with_target(true)
-                .with_thread_ids(args.debug)
-                .with_file(args.debug)
-                .with_line_number(args.debug)
-                .boxed()
+            match default_format {
+                "compact" => fmt::layer()
+                    .compact()
+                    .with_target(true)
+                    .with_thread_ids(false)
+                    .with_file(false)
+                    .with_line_number(false)
+                    .boxed(),
+                _ => fmt::layer()
+                    .with_target(true)
+                    .with_thread_ids(args.debug)
+                    .with_file(args.debug)
+                    .with_line_number(args.debug)
+                    .boxed(),
+            }
         }
     };
 

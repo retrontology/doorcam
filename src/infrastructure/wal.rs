@@ -406,9 +406,7 @@ mod tests {
         let event_id = "test-event-123".to_string();
 
         // Write frames
-        let mut writer = WalWriter::new(event_id.clone(), wal_dir, 30)
-            .await
-            .unwrap();
+        let mut writer = WalWriter::new(event_id.clone(), wal_dir, 30).await.unwrap();
 
         for i in 0..10 {
             let frame = FrameData::new(
