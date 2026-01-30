@@ -26,6 +26,7 @@ use super::{
 pub struct VideoCapture {
     config: CaptureConfig,
     event_config: EventConfig,
+    camera_fps: u32,
     event_bus: Arc<EventBus>,
     ring_buffer: Arc<RingBuffer>,
     active_captures: Arc<RwLock<Vec<Arc<CaptureEventTask>>>>,
@@ -75,6 +76,7 @@ impl VideoCapture {
     pub fn new(
         config: CaptureConfig,
         event_config: EventConfig,
+        camera_fps: u32,
         event_bus: Arc<EventBus>,
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
@@ -89,6 +91,7 @@ impl VideoCapture {
         Self {
             config,
             event_config,
+            camera_fps,
             event_bus,
             ring_buffer,
             active_captures: Arc::new(RwLock::new(Vec::new())),
@@ -259,7 +262,7 @@ impl VideoCapture {
         let postroll_duration = Duration::from_secs(event_config.postroll_seconds as u64);
 
         let wal_dir = PathBuf::from(&config.path).join("wal");
-        let mut wal_writer = WalWriter::new(event_id.clone(), &wal_dir).await?;
+        let mut wal_writer = WalWriter::new(event_id.clone(), &wal_dir, self.camera_fps).await?;
 
         let preroll_start = capture_task.initial_motion_time - preroll_duration;
         let preroll_frames = ring_buffer
@@ -361,6 +364,7 @@ impl VideoCapture {
                 capture_dir: capture_task.capture_dir.clone(),
                 wal_path,
                 frame_count,
+                camera_fps: self.camera_fps,
             };
 
             if let Err(e) = video_queue_tx.send(job) {
@@ -461,6 +465,7 @@ impl VideoCapture {
                 capture_dir,
                 wal_path,
                 frame_count,
+                camera_fps: self.camera_fps,
             };
 
             if let Err(e) = self.video_queue_tx.send(job) {
@@ -502,6 +507,7 @@ impl Clone for VideoCapture {
         Self {
             config: self.config.clone(),
             event_config: self.event_config.clone(),
+            camera_fps: self.camera_fps,
             event_bus: Arc::clone(&self.event_bus),
             ring_buffer: Arc::clone(&self.ring_buffer),
             active_captures: Arc::clone(&self.active_captures),

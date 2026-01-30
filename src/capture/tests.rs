@@ -39,7 +39,7 @@ async fn test_video_capture_creation() {
     let event_bus = Arc::new(EventBus::new());
     let ring_buffer = Arc::new(RingBuffer::new(50, Duration::from_secs(5)));
 
-    let capture = VideoCapture::new(capture_config, event_config, event_bus, ring_buffer);
+    let capture = VideoCapture::new(capture_config, event_config, 30, event_bus, ring_buffer);
 
     let stats = capture.get_capture_stats().await;
     assert_eq!(stats.active_captures, 0);
@@ -62,6 +62,7 @@ async fn test_motion_triggered_capture() {
     let capture = VideoCapture::new(
         capture_config,
         event_config,
+        30,
         Arc::clone(&event_bus),
         ring_buffer,
     );
@@ -94,6 +95,7 @@ async fn test_capture_completion() {
     let capture = VideoCapture::new(
         capture_config,
         event_config,
+        30,
         Arc::clone(&event_bus),
         ring_buffer,
     );

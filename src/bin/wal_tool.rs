@@ -794,7 +794,7 @@ mod tests {
         event_id: &str,
         timestamps: &[SystemTime],
     ) -> Result<PathBuf> {
-        let mut writer = WalWriter::new(event_id.to_string(), wal_dir)
+        let mut writer = WalWriter::new(event_id.to_string(), wal_dir, 30)
             .await
             .context("Failed to create WAL writer")?;
 

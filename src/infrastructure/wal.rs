@@ -10,7 +10,7 @@ use tracing::{debug, info};
 
 /// Magic number for WAL file format: "DCAM"
 const WAL_MAGIC: [u8; 4] = *b"DCAM";
-const WAL_VERSION: u32 = 1;
+const WAL_VERSION: u32 = 2;
 const WAL_HEADER_SIZE: usize = 32;
 
 /// Write-Ahead Log writer for persistent frame storage
@@ -21,11 +21,12 @@ pub struct WalWriter {
     last_sync: Instant,
     event_id: String,
     wal_path: PathBuf,
+    fps: u32,
 }
 
 impl WalWriter {
     /// Create a new WAL writer for an event
-    pub async fn new(event_id: String, wal_dir: &Path) -> Result<Self> {
+    pub async fn new(event_id: String, wal_dir: &Path, fps: u32) -> Result<Self> {
         // Ensure WAL directory exists
         tokio::fs::create_dir_all(wal_dir).await.map_err(|e| {
             DoorcamError::component("wal", &format!("Failed to create WAL directory: {}", e))
@@ -50,6 +51,7 @@ impl WalWriter {
             last_sync: Instant::now(),
             event_id: event_id.clone(),
             wal_path: wal_path.clone(),
+            fps,
         };
 
         // Write header
@@ -82,8 +84,8 @@ impl WalWriter {
         // Frame count placeholder (will be updated on close)
         header.extend_from_slice(&0u32.to_le_bytes());
 
-        // Reserved
-        header.extend_from_slice(&0u32.to_le_bytes());
+        // Camera FPS (0 if unknown)
+        header.extend_from_slice(&self.fps.to_le_bytes());
 
         // Write header directly to file
         self.file.write_all(&header).await.map_err(|e| {
@@ -243,6 +245,7 @@ pub struct WalFrameReader {
     file: File,
     frame_count: u32,
     path: PathBuf,
+    fps: u32,
 }
 
 impl WalFrameReader {
@@ -268,7 +271,7 @@ impl WalFrameReader {
 
         // Read version
         let version = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-        if version != WAL_VERSION {
+        if version != 1 && version != WAL_VERSION {
             return Err(DoorcamError::component(
                 "wal",
                 &format!("Unsupported WAL version: {}", version),
@@ -277,17 +280,28 @@ impl WalFrameReader {
 
         // Read frame count
         let frame_count = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+        let fps = if version >= 2 {
+            u32::from_le_bytes([header[28], header[29], header[30], header[31]])
+        } else {
+            0
+        };
 
         Ok(Self {
             file,
             frame_count,
             path,
+            fps,
         })
     }
 
     /// Get the frame count recorded in the WAL header
     pub fn frame_count(&self) -> u32 {
         self.frame_count
+    }
+
+    /// Get the FPS recorded in the WAL header (0 if unknown)
+    pub fn fps(&self) -> u32 {
+        self.fps
     }
 
     /// Read the next frame from the WAL (None on EOF)
@@ -392,7 +406,9 @@ mod tests {
         let event_id = "test-event-123".to_string();
 
         // Write frames
-        let mut writer = WalWriter::new(event_id.clone(), wal_dir).await.unwrap();
+        let mut writer = WalWriter::new(event_id.clone(), wal_dir, 30)
+            .await
+            .unwrap();
 
         for i in 0..10 {
             let frame = FrameData::new(

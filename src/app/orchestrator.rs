@@ -84,6 +84,7 @@ impl DoorcamOrchestrator {
         let capture_integration = Some(VideoCaptureIntegration::new(
             config.capture.clone(),
             config.event.clone(),
+            config.camera.fps,
             Arc::clone(&event_bus),
             capture_ring_buffer,
         ));

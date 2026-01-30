@@ -18,11 +18,12 @@ impl VideoCaptureIntegration {
     pub fn new(
         config: CaptureConfig,
         event_config: EventConfig,
+        camera_fps: u32,
         event_bus: Arc<EventBus>,
         ring_buffer: Arc<RingBuffer>,
     ) -> Self {
         let capture =
-            VideoCapture::new(config.clone(), event_config.clone(), event_bus, ring_buffer);
+            VideoCapture::new(config.clone(), event_config.clone(), camera_fps, event_bus, ring_buffer);
 
         Self {
             capture,
@@ -94,6 +95,7 @@ impl VideoCaptureIntegration {
 pub struct VideoCaptureIntegrationBuilder {
     config: Option<CaptureConfig>,
     event_config: Option<EventConfig>,
+    camera_fps: Option<u32>,
     event_bus: Option<Arc<EventBus>>,
     ring_buffer: Option<Arc<RingBuffer>>,
 }
@@ -103,6 +105,7 @@ impl VideoCaptureIntegrationBuilder {
         Self {
             config: None,
             event_config: None,
+            camera_fps: None,
             event_bus: None,
             ring_buffer: None,
         }
@@ -115,6 +118,11 @@ impl VideoCaptureIntegrationBuilder {
 
     pub fn event_config(mut self, event_config: EventConfig) -> Self {
         self.event_config = Some(event_config);
+        self
+    }
+
+    pub fn camera_fps(mut self, camera_fps: u32) -> Self {
+        self.camera_fps = Some(camera_fps);
         self
     }
 
@@ -144,6 +152,13 @@ impl VideoCaptureIntegrationBuilder {
             DoorcamError::component("video_capture_integration_builder", "Event bus is required")
         })?;
 
+        let camera_fps = self.camera_fps.ok_or_else(|| {
+            DoorcamError::component(
+                "video_capture_integration_builder",
+                "Camera FPS is required",
+            )
+        })?;
+
         let ring_buffer = self.ring_buffer.ok_or_else(|| {
             DoorcamError::component(
                 "video_capture_integration_builder",
@@ -154,6 +169,7 @@ impl VideoCaptureIntegrationBuilder {
         Ok(VideoCaptureIntegration::new(
             config,
             event_config,
+            camera_fps,
             event_bus,
             ring_buffer,
         ))

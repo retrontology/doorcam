@@ -8,7 +8,7 @@ use std::process::Stdio;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 #[cfg(target_os = "linux")]
-use tokio::{io::AsyncWriteExt, process::Command, time::sleep};
+use tokio::{io::AsyncWriteExt, process::Command};
 use tracing::{debug, info, warn};
 
 use super::overlay::prepare_jpeg;
@@ -20,6 +20,7 @@ pub(crate) struct VideoGenerationJob {
     pub(crate) capture_dir: PathBuf,
     pub(crate) wal_path: PathBuf,
     pub(crate) frame_count: u32,
+    pub(crate) camera_fps: u32,
 }
 
 /// Background worker that processes video generation jobs
@@ -65,7 +66,16 @@ pub(crate) async fn generate_video_from_wal(
 
     #[cfg(target_os = "linux")]
     {
-        create_video_ffmpeg_from_wal(&mut reader, &job.capture_dir, &video_path, config).await?;
+        let wal_fps = reader.fps();
+        let fps = if wal_fps > 0 { wal_fps } else { job.camera_fps }.max(1);
+        create_video_ffmpeg_from_wal(
+            &mut reader,
+            &job.capture_dir,
+            &video_path,
+            config,
+            fps,
+        )
+        .await?;
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -91,6 +101,7 @@ pub(crate) async fn create_video_ffmpeg_from_wal(
     capture_dir: &Path,
     video_path: &Path,
     config: &CaptureConfig,
+    fps: u32,
 ) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -119,19 +130,20 @@ pub(crate) async fn create_video_ffmpeg_from_wal(
     }
 
     let mut cmd = Command::new("ffmpeg");
+    let fps_arg = fps.to_string();
     cmd.args([
         "-hide_banner",
         "-loglevel",
         "error",
         "-y",
+        "-framerate",
+        &fps_arg,
         "-f",
         "mjpeg",
-        "-use_wallclock_as_timestamps",
-        "1",
         "-i",
         "pipe:0",
-        "-vsync",
-        "vfr",
+        "-r",
+        &fps_arg,
         "-c:v",
         "h264_v4l2m2m",
         "-b:v",
@@ -161,7 +173,6 @@ pub(crate) async fn create_video_ffmpeg_from_wal(
         .ok_or_else(|| DoorcamError::component("video_capture", "Failed to open FFmpeg stdin"))?;
 
     let mut frame_index: u32 = 0;
-    let mut prev_timestamp: Option<SystemTime> = None;
 
     while let Some(frame) = reader.next_frame().await? {
         let jpeg_data = prepare_jpeg(&frame, config).await.map_err(|e| {
@@ -175,14 +186,6 @@ pub(crate) async fn create_video_ffmpeg_from_wal(
             write_frame_jpeg(&jpeg_data, frame.timestamp, dir, tz).await?;
         }
 
-        if let Some(prev) = prev_timestamp {
-            if let Ok(delta) = frame.timestamp.duration_since(prev) {
-                if !delta.is_zero() {
-                    sleep(delta).await;
-                }
-            }
-        }
-
         stdin.write_all(&jpeg_data).await.map_err(|e| {
             DoorcamError::component(
                 "video_capture",
@@ -194,7 +197,6 @@ pub(crate) async fn create_video_ffmpeg_from_wal(
             debug!("[ffmpeg] Encoded {} frames", frame_index);
         }
         frame_index += 1;
-        prev_timestamp = Some(frame.timestamp);
     }
 
     stdin.shutdown().await.map_err(|e| {
