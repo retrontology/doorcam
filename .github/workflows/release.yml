@@ -9,7 +9,12 @@ permissions:
 
 jobs:
   build-aarch64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    env:
+      PKG_CONFIG_ALLOW_CROSS: "1"
+      PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/arm64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+      PKG_CONFIG_SYSROOT_DIR: /
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,14 +24,20 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
 
-      - name: Install cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
+      - name: Install cross-compile dependencies
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            pkg-config \
+            libglib2.0-dev:arm64 \
+            libgstreamer1.0-dev:arm64 \
+            libgstreamer-plugins-base1.0-dev:arm64
 
       - name: Build release binaries (aarch64)
         run: |
-          cross build --release --target aarch64-unknown-linux-gnu
+          cargo build --release --target aarch64-unknown-linux-gnu
 
       - name: Collect release artifacts
         run: |
