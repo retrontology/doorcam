@@ -1,135 +1,169 @@
-# Doorcam - Rust Door Camera System
+# Doorcam
 
-A high-performance door camera system written in Rust, featuring motion detection, video capture, live streaming, and display functionality for Raspberry Pi.
+Rust-based door camera system with motion detection, capture, live streaming, and display/touch integration. This project is designed for a Raspberry Pi 4 running Raspbian OS with a HyperPixel 4.0 screen.
 
 ## Features
+- Motion detection on a rolling ring buffer (pre/post-roll recording).
+- MJPEG streaming server with a simple HTML viewer.
+- Motion-triggered capture to WAL, optional JPEG frames, MP4 encoding, and metadata.
+- Display output for HyperPixel-style framebuffers with backlight control.
+- Touch input to wake/keep the display active.
+- Event bus + orchestrator to coordinate components.
+- CLI modes for config printing, validation, and dry runs.
 
-- **Motion Detection**: Background subtraction with configurable sensitivity
-- **Video Capture**: Motion-triggered recording with preroll/postroll
-- **Live Streaming**: MJPEG HTTP streaming for remote viewing
-- **Local Display**: HyperPixel 4.0 support with touch activation
-- **Configuration**: TOML-based config with environment variable overrides
-- **Logging**: Structured logging with tracing
-- **Performance**: Lock-free ring buffer and async architecture
+## Quick start
+1. Complete the Raspberry Pi setup steps below.
+2. Review or copy `doorcam.toml`.
+3. Build and run:
 
-## Quick Start
-
-### Prerequisites
-
-- Rust 1.70+ 
-- Raspberry Pi with camera module
-- Optional: HyperPixel 4.0 display
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd doorcam
 ```
-
-2. Build the project:
-```bash
 cargo build --release
+./target/release/doorcam --config doorcam.toml
 ```
 
-3. Copy and customize the configuration:
-```bash
-cp doorcam.toml my-doorcam.toml
-# Edit my-doorcam.toml as needed
+Common CLI options:
+```
+./target/release/doorcam --print-config
+./target/release/doorcam --validate-config --config doorcam.toml
+./target/release/doorcam --debug --enable-keyboard
 ```
 
-4. Run the application:
-```bash
-cargo run -- --config my-doorcam.toml
+Keyboard debug mode (optional):
+- `SPACE` triggers a motion event
+- `Q` or `ESC` shuts down
+
+## Streaming
+The MJPEG server exposes:
+- Viewer: `http://<ip>:8080/`
+- Stream: `http://<ip>:8080/stream.mjpg`
+- Health: `http://<ip>:8080/health`
+
+The bind address and port are controlled by `stream.ip` and `stream.port`.
+
+## Capture output
+By default, captures go to `./captures`.
+
+Typical outputs:
+- WAL files: `./captures/wal/<event_id>.wal`
+- MP4 files: `./captures/<event_id>.mp4` (when `capture.video_encoding = true`)
+- JPEG frames: `./captures/<event_id>/frames/*.jpg` (when `capture.keep_images = true`)
+- Metadata: `./captures/metadata/<event_id>.json` (when `capture.save_metadata = true`)
+
+## WAL tool
+`waltool` converts WAL files into images/video/metadata.
+
+```
+cargo run --bin waltool -- --input ./captures/wal
+cargo run --bin waltool -- --input ./captures/wal/20240101_120000_123.wal --video --images --metadata
 ```
 
 ## Configuration
+Configuration is loaded from `doorcam.toml` (optional) and environment variables with the `DOORCAM_` prefix.
 
-The system uses TOML configuration files with environment variable overrides. See `doorcam.toml` for all available options.
-
-### Environment Variables
-
-All configuration options can be overridden using environment variables with the `DOORCAM_` prefix:
-
-```bash
-export DOORCAM_CAMERA_INDEX=1
-export DOORCAM_STREAM_PORT=9090
-export DOORCAM_CAPTURE_PATH="/var/lib/doorcam"
+Examples:
+```
+DOORCAM_CAMERA_INDEX=1
+DOORCAM_CAMERA_RESOLUTION="[1280, 720]"
+DOORCAM_STREAM_PORT=9090
+DOORCAM_CAPTURE_PATH="/var/lib/doorcam/captures"
+DOORCAM_EVENT_PREROLL_SECONDS=3
+DOORCAM_EVENT_POSTROLL_SECONDS=8
 ```
 
-### Key Configuration Sections
+Key sections:
+- `camera`: device index, resolution, fps, format.
+- `analyzer`: motion detection fps and thresholds.
+- `event`: pre/post-roll timing.
+- `capture`: output path, timestamp overlay, encoding options.
+- `stream`: bind ip/port and optional rotation.
+- `display`: framebuffer/backlight/touch devices and activation period.
+- `system`: retention and cleanup options.
 
-- **camera**: Video device settings (resolution, FPS, format)
-- **analyzer**: Motion detection parameters
-- **capture**: Recording settings and storage paths
-- **stream**: MJPEG server configuration
-- **display**: HyperPixel display and touch settings
-- **system**: Buffer sizes and cleanup settings
+Run `--print-config` for the built-in defaults.
 
-## Usage
+## Systemd service
+An example service file is provided at `systemd/doorcam.service`.
 
-### Command Line Options
-
-```bash
-doorcam [OPTIONS]
-
-Options:
-  -c, --config <FILE>    Configuration file path [default: doorcam.toml]
-  -d, --debug           Enable debug logging
-  -v, --verbose         Enable verbose logging
-  -h, --help            Print help
-  -V, --version         Print version
+Typical setup:
+1. Install the binary (example):
+```
+sudo install -m 755 ./target/release/doorcam /usr/local/bin/doorcam
+```
+2. Create config + data directories:
+```
+sudo install -d -m 755 /etc/doorcam /var/lib/doorcam
+sudo cp doorcam.toml /etc/doorcam/doorcam.toml
+```
+3. Create a service user and grant device access:
+```
+sudo useradd --system --home /var/lib/doorcam --shell /usr/sbin/nologin doorcam
+sudo usermod -aG video,input doorcam
+```
+4. Install the service file and start it:
+```
+sudo cp systemd/doorcam.service /etc/systemd/system/doorcam.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now doorcam.service
 ```
 
-### Logging
+Edit the service file if your binary or config paths differ.
 
-The system uses structured logging with different levels:
-
-- **Error**: Critical issues requiring attention
-- **Warn**: Important events and recoverable errors  
-- **Info**: General operational information
-- **Debug**: Detailed diagnostic information
-
-Set log levels via environment:
-```bash
-export RUST_LOG=doorcam=debug
+## Raspberry Pi 4 setup (Raspbian + HyperPixel 4.0)
+1. Start from Raspberry Pi OS (Bullseye or newer) and run system updates:
 ```
+sudo apt update
+sudo apt upgrade -y
+```
+2. Install build and runtime dependencies:
+```
+sudo apt install -y \
+  build-essential pkg-config git \
+  gstreamer1.0-tools gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  ffmpeg v4l-utils
+```
+3. Enable the HyperPixel 4.0 overlay in `/boot/config.txt`:
+```
+sudo sed -i '$a dtoverlay=hyperpixel4' /boot/config.txt
+```
+Reboot after adding the overlay:
+```
+sudo reboot
+```
+4. Verify devices:
+```
+ls /dev/video0
+ls /dev/fb0
+ls /dev/input/event0
+```
+Note: the camera should appear as a USB V4L2 device (e.g., `/dev/video0`).
+5. Adjust `doorcam.toml` for device paths if they differ:
+- `display.framebuffer_device` (default `/dev/fb0`)
+- `display.backlight_device`
+- `display.touch_device`
+6. Build and run Doorcam (see Quick start).
+
+## System requirements
+Target platform:
+- Raspberry Pi 4 running Raspbian OS.
+- HyperPixel 4.0 display (framebuffer + touch input).
+- USB V4L2 camera device (e.g., `/dev/video0`).
+- GStreamer and FFmpeg with `h264_v4l2m2m` for hardware-accelerated encoding.
 
 ## Development
-
-### Project Structure
-
 ```
-src/
-├── main.rs              # Application entry point and CLI
-├── lib.rs               # Module wiring and public re-exports
-├── app/                 # Orchestrator, keyboard/debug utilities
-├── core/                # Config, error, events, frames, ring buffer, recovery
-├── features/            # Camera, analyzer, capture, display, touch, streaming
-├── integrations/        # Integration layers (camera/buffer, capture, display, storage, streaming)
-├── infrastructure/      # Storage subsystem and WAL implementation
-└── bin/
-    └── wal_tool.rs      # WAL maintenance utility
-```
-
-### Building
-
-```bash
-# Development build
-cargo build
-
-# Release build
-cargo build --release
-
-# Run tests
 cargo test
+```
 
-# Check code
-cargo clippy
-cargo fmt
+Logging:
+```
+RUST_LOG=doorcam=debug ./target/release/doorcam --config doorcam.toml
 ```
 
 ## License
+MIT. See `LICENSE`.
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## Disclaimer
+This project was created with the assistance of agentic AI.
