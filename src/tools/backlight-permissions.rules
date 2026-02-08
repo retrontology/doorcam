@@ -1,2 +1,0 @@
-SUBSYSTEM=="backlight",RUN+="/bin/chmod 664 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
-SUBSYSTEM=="backlight",RUN+="/bin/chown root:video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"

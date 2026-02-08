@@ -1,0 +1,93 @@
+[package]
+name = "doorcam"
+version = "0.1.0"
+edition = "2021"
+authors = ["Doorcam Team"]
+description = "Rust-based door camera system with motion detection and streaming"
+license = "MIT"
+
+[dependencies]
+# Configuration management
+serde = { version = "1.0", features = ["derive"] }
+config = "0.14"
+toml = "0.8"
+
+# Async runtime and utilities
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Platform bindings
+libc = "0.2"
+
+# Atomic operations and concurrency
+crossbeam = "0.8"
+parking_lot = "0.12"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
+
+# HTTP server
+axum = { version = "0.7" }
+tower = { version = "0.4" }
+tower-http = { version = "0.5" }
+
+# Async streams
+async-stream = { version = "0.3" }
+futures = { version = "0.3" }
+bytes = { version = "1.0" }
+
+# JSON serialization
+serde_json = "1.0"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Terminal/keyboard input handling
+crossterm = "0.27"
+
+[dev-dependencies]
+tempfile = "3.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# GStreamer for hardware acceleration
+gstreamer = { version = "0.24" }
+gstreamer-app = { version = "0.24" }
+gstreamer-video = { version = "0.24" }
+# Input device handling (Linux only)
+evdev = { version = "0.12" }
+
+[dependencies.image]
+version = "0.24"
+
+[dependencies.imageproc]
+version = "0.23"
+
+[dependencies.rusttype]
+version = "0.9"
+
+[[bin]]
+name = "doorcam"
+path = "src/main.rs"
+
+[[bin]]
+name = "waltool"
+path = "src/bin/wal_tool.rs"
+
+
+
+
+

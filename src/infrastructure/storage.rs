@@ -1,0 +1,1815 @@
+use crate::{
+    config::{CaptureConfig, SystemConfig},
+    error::{DoorcamError, Result},
+    events::{DoorcamEvent, EventBus},
+};
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::fs;
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
+
+/// Event storage system for managing captured video events and automatic cleanup
+pub struct EventStorage {
+    capture_config: CaptureConfig,
+    system_config: SystemConfig,
+    event_bus: Arc<EventBus>,
+    event_registry: Arc<RwLock<EventRegistry>>,
+    cleanup_running: Arc<RwLock<bool>>,
+}
+
+/// Registry of stored events with metadata
+#[derive(Debug, Clone, Default)]
+struct EventRegistry {
+    events: HashMap<String, StoredEventMetadata>,
+    last_cleanup: Option<SystemTime>,
+}
+
+/// Metadata for a stored event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredEventMetadata {
+    pub event_id: String,
+    pub timestamp: SystemTime,
+    pub directory_path: PathBuf,
+    pub file_count: u32,
+    pub total_size_bytes: u64,
+    pub event_type: StoredEventType,
+    pub created_at: SystemTime,
+    pub last_accessed: SystemTime,
+}
+
+/// Types of stored events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StoredEventType {
+    MotionCapture {
+        motion_area: f64,
+        preroll_frames: usize,
+        postroll_frames: usize,
+    },
+    ManualCapture {
+        trigger_reason: String,
+    },
+}
+
+/// Statistics about the event storage system
+#[derive(Debug, Clone)]
+pub struct StorageStats {
+    pub total_events: usize,
+    pub total_size_bytes: u64,
+    pub oldest_event: Option<SystemTime>,
+    pub newest_event: Option<SystemTime>,
+    pub events_by_type: HashMap<String, usize>,
+    pub last_cleanup: Option<SystemTime>,
+}
+
+/// Cleanup operation result
+#[derive(Debug, Clone)]
+pub struct CleanupResult {
+    pub events_deleted: usize,
+    pub bytes_freed: u64,
+    pub errors: Vec<String>,
+    pub duration: Duration,
+}
+
+/// Cleanup status information
+#[derive(Debug, Clone)]
+pub struct CleanupStatus {
+    pub is_running: bool,
+    pub retention_days: u32,
+    pub last_cleanup: Option<SystemTime>,
+    pub events_eligible_for_cleanup: usize,
+    pub bytes_eligible_for_cleanup: u64,
+    pub total_events: usize,
+}
+
+/// Integration wrapper for EventStorage with additional management capabilities
+pub struct EventStorageIntegration {
+    storage: Arc<EventStorage>,
+    running: Arc<RwLock<bool>>,
+    stats: Arc<RwLock<StorageIntegrationStats>>,
+}
+
+/// Statistics for the storage integration
+#[derive(Debug, Clone, Default)]
+pub struct StorageIntegrationStats {
+    pub start_time: Option<SystemTime>,
+    pub total_cleanups: u64,
+    pub total_events_deleted: u64,
+    pub total_bytes_freed: u64,
+    pub last_cleanup_result: Option<CleanupResult>,
+    pub cleanup_errors: u64,
+}
+
+/// Combined storage statistics
+#[derive(Debug, Clone)]
+pub struct CombinedStorageStats {
+    pub storage: StorageStats,
+    pub integration: StorageIntegrationStats,
+}
+
+/// Health status levels
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageHealthStatusLevel {
+    Healthy,
+    Warning,
+    Critical,
+}
+
+/// Health status for storage system
+#[derive(Debug, Clone)]
+pub struct StorageHealthStatus {
+    pub status: StorageHealthStatusLevel,
+    pub issues: Vec<String>,
+    pub uptime: Option<Duration>,
+    pub storage_stats: StorageStats,
+    pub integration_stats: StorageIntegrationStats,
+}
+
+/// Builder for EventStorageIntegration
+pub struct EventStorageIntegrationBuilder {
+    capture_config: Option<CaptureConfig>,
+    system_config: Option<SystemConfig>,
+    event_bus: Option<Arc<EventBus>>,
+}
+
+impl EventStorageIntegrationBuilder {
+    pub fn new() -> Self {
+        Self {
+            capture_config: None,
+            system_config: None,
+            event_bus: None,
+        }
+    }
+
+    pub fn with_capture_config(mut self, config: CaptureConfig) -> Self {
+        self.capture_config = Some(config);
+        self
+    }
+
+    pub fn with_system_config(mut self, config: SystemConfig) -> Self {
+        self.system_config = Some(config);
+        self
+    }
+
+    pub fn with_event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn build(self) -> Result<EventStorageIntegration> {
+        let capture_config = self.capture_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Capture config is required")
+        })?;
+
+        let system_config = self.system_config.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "System config is required")
+        })?;
+
+        let event_bus = self.event_bus.ok_or_else(|| {
+            DoorcamError::component("storage_integration", "Event bus is required")
+        })?;
+
+        let storage = Arc::new(EventStorage::new(capture_config, system_config, event_bus));
+
+        Ok(EventStorageIntegration {
+            storage,
+            running: Arc::new(RwLock::new(false)),
+            stats: Arc::new(RwLock::new(StorageIntegrationStats::default())),
+        })
+    }
+}
+
+impl Default for EventStorageIntegrationBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EventStorageIntegration {
+    pub fn builder() -> EventStorageIntegrationBuilder {
+        EventStorageIntegrationBuilder::new()
+    }
+
+    pub async fn start(&self) -> Result<()> {
+        {
+            let mut running = self.running.write().await;
+            if *running {
+                return Err(DoorcamError::component(
+                    "storage_integration",
+                    "Already running",
+                ));
+            }
+            *running = true;
+        }
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.start_time = Some(SystemTime::now());
+        }
+
+        info!("Starting event storage integration");
+
+        self.storage.start().await?;
+        self.start_monitoring_task().await;
+
+        info!("Event storage integration started successfully");
+        Ok(())
+    }
+
+    async fn start_monitoring_task(&self) {
+        let storage = Arc::clone(&self.storage);
+        let stats = Arc::clone(&self.stats);
+        let running = Arc::clone(&self.running);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300)); // Every 5 minutes
+
+            loop {
+                interval.tick().await;
+
+                {
+                    let running_guard = running.read().await;
+                    if !*running_guard {
+                        break;
+                    }
+                }
+
+                if let Err(e) = Self::update_monitoring_stats(&storage, &stats).await {
+                    error!("Failed to update monitoring stats: {}", e);
+                }
+            }
+        });
+    }
+
+    async fn update_monitoring_stats(
+        storage: &Arc<EventStorage>,
+        _stats: &Arc<RwLock<StorageIntegrationStats>>,
+    ) -> Result<()> {
+        let storage_stats = storage.get_storage_stats().await;
+
+        debug!(
+            "Storage monitoring: {} events, {} bytes, last cleanup: {:?}",
+            storage_stats.total_events, storage_stats.total_size_bytes, storage_stats.last_cleanup
+        );
+
+        const WARNING_THRESHOLD_GB: u64 = 10 * 1024 * 1024 * 1024;
+        if storage_stats.total_size_bytes > WARNING_THRESHOLD_GB {
+            warn!(
+                "Storage usage is high: {:.2} GB ({} events)",
+                storage_stats.total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                storage_stats.total_events
+            );
+        }
+
+        if let Some(oldest) = storage_stats.oldest_event {
+            if let Ok(age) = oldest.elapsed() {
+                const WARNING_AGE_DAYS: u64 = 30;
+                if age > Duration::from_secs(WARNING_AGE_DAYS * 24 * 3600) {
+                    warn!(
+                        "Oldest event is {} days old, consider checking cleanup configuration",
+                        age.as_secs() / (24 * 3600)
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_manual_cleanup(&self) -> Result<CleanupResult> {
+        info!("Running manual cleanup");
+
+        let start_time = SystemTime::now();
+        let result = self.storage.run_cleanup().await;
+        let duration = start_time.elapsed().unwrap_or_default();
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_cleanups += 1;
+
+            match &result {
+                Ok(cleanup_result) => {
+                    stats.total_events_deleted += cleanup_result.events_deleted as u64;
+                    stats.total_bytes_freed += cleanup_result.bytes_freed;
+                    stats.last_cleanup_result = Some(cleanup_result.clone());
+                    info!(
+                        "Manual cleanup completed: deleted {} events, freed {} bytes in {:?}",
+                        cleanup_result.events_deleted, cleanup_result.bytes_freed, duration
+                    );
+                }
+                Err(e) => {
+                    stats.cleanup_errors += 1;
+                    error!("Manual cleanup failed: {}", e);
+                }
+            }
+        }
+
+        Ok(result?)
+    }
+
+    pub async fn run_cleanup_with_retention(&self, retention_days: u32) -> Result<CleanupResult> {
+        info!(
+            "Running cleanup with custom retention: {} days",
+            retention_days
+        );
+
+        let result = self
+            .storage
+            .run_cleanup_with_retention(retention_days)
+            .await?;
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_cleanups += 1;
+            stats.total_events_deleted += result.events_deleted as u64;
+            stats.total_bytes_freed += result.bytes_freed;
+            stats.last_cleanup_result = Some(result.clone());
+        }
+
+        info!(
+            "Cleanup with retention completed: {} events deleted, {} bytes freed",
+            result.events_deleted, result.bytes_freed
+        );
+
+        Ok(result)
+    }
+
+    pub async fn get_stats(&self) -> StorageIntegrationStats {
+        self.stats.read().await.clone()
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        {
+            let mut running = self.running.write().await;
+            if !*running {
+                warn!("Storage integration already stopped");
+                return Ok(());
+            }
+            *running = false;
+        }
+
+        info!("Stopping storage integration");
+
+        self.storage.stop().await?;
+
+        info!("Storage integration stopped");
+        Ok(())
+    }
+}
+
+impl EventStorage {
+    /// Create a new event storage system
+    pub fn new(
+        capture_config: CaptureConfig,
+        system_config: SystemConfig,
+        event_bus: Arc<EventBus>,
+    ) -> Self {
+        Self {
+            capture_config,
+            system_config,
+            event_bus,
+            event_registry: Arc::new(RwLock::new(EventRegistry::default())),
+            cleanup_running: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    /// Start the event storage system
+    pub async fn start(&self) -> Result<()> {
+        info!("Starting event storage system");
+
+        // Create base capture directory if it doesn't exist
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        if !capture_path.exists() {
+            fs::create_dir_all(&capture_path).await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to create capture directory: {}", e),
+                )
+            })?;
+            info!("Created capture directory: {}", capture_path.display());
+        }
+
+        // Load existing events from filesystem
+        self.scan_and_register_existing_events().await?;
+
+        // Start periodic rescan to catch video-only events
+        self.start_rescan_scheduler().await?;
+
+        // Subscribe to capture completion events
+        let mut event_receiver = self.event_bus.subscribe();
+        let storage_system = Arc::new(self.clone());
+
+        tokio::spawn(async move {
+            loop {
+                match event_receiver.recv().await {
+                    Ok(event) => {
+                        match event {
+                            DoorcamEvent::CaptureCompleted {
+                                event_id,
+                                file_count,
+                            } => {
+                                if let Err(e) = storage_system
+                                    .register_completed_capture(&event_id, file_count)
+                                    .await
+                                {
+                                    error!(
+                                        "Failed to register completed capture {}: {}",
+                                        event_id, e
+                                    );
+                                }
+                            }
+                            _ => {} // Ignore other events
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        warn!(
+                            "Storage event listener lagged by {} events; continuing",
+                            skipped
+                        );
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!("Event bus closed; stopping storage event listener");
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Start cleanup scheduler if enabled
+        if self.system_config.trim_old {
+            self.start_cleanup_scheduler().await?;
+        }
+
+        info!("Event storage system started successfully");
+        Ok(())
+    }
+
+    /// Scan filesystem and register existing events
+    async fn scan_and_register_existing_events(&self) -> Result<()> {
+        let capture_path = PathBuf::from(&self.capture_config.path);
+
+        debug!(
+            "Scanning for existing events in: {}",
+            capture_path.display()
+        );
+
+        let mut entries = fs::read_dir(&capture_path).await.map_err(|e| {
+            DoorcamError::component(
+                "event_storage",
+                &format!("Failed to read capture directory: {}", e),
+            )
+        })?;
+
+        let mut registered_count = 0;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            DoorcamError::component(
+                "event_storage",
+                &format!("Failed to read directory entry: {}", e),
+            )
+        })? {
+            let path = entry.path();
+
+            if path.is_dir() {
+                if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                    // Check if directory name matches timestamp pattern (YYYYMMDD_HHMMSS_mmm)
+                    if self.is_valid_event_directory_name(dir_name) {
+                        if self.is_event_registered(dir_name).await {
+                            continue;
+                        }
+                        match self.register_existing_event(&path).await {
+                            Ok(_) => {
+                                registered_count += 1;
+                                debug!("Registered existing event: {}", dir_name);
+                            }
+                            Err(e) => {
+                                warn!("Failed to register existing event {}: {}", dir_name, e);
+                            }
+                        }
+                    }
+                }
+            } else if path.is_file() {
+                if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                    if extension.eq_ignore_ascii_case("mp4") {
+                        if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            if self.is_valid_event_directory_name(file_stem) {
+                                if self.is_event_registered(file_stem).await {
+                                    continue;
+                                }
+                                match self.register_completed_capture(file_stem, 0).await {
+                                    Ok(_) => {
+                                        registered_count += 1;
+                                        debug!(
+                                            "Registered existing video-only event: {}",
+                                            file_stem
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to register existing video-only event {}: {}",
+                                            file_stem, e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("Registered {} existing events", registered_count);
+        Ok(())
+    }
+
+    async fn is_event_registered(&self, event_id: &str) -> bool {
+        let registry = self.event_registry.read().await;
+        registry.events.contains_key(event_id)
+    }
+
+    /// Check if directory name matches expected timestamp pattern
+    fn is_valid_event_directory_name(&self, name: &str) -> bool {
+        // Pattern: YYYYMMDD_HHMMSS_mmm (e.g., 20231019_143022_123)
+        name.len() == 19
+            && name.chars().enumerate().all(|(i, c)| match i {
+                8 | 15 => c == '_',
+                _ => c.is_ascii_digit(),
+            })
+    }
+
+    /// Register an existing event directory
+    async fn register_existing_event(&self, event_dir: &Path) -> Result<()> {
+        let dir_name = event_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| DoorcamError::component("event_storage", "Invalid directory name"))?;
+
+        // Parse timestamp from directory name
+        let timestamp = self.parse_timestamp_from_directory_name(dir_name)?;
+
+        // Calculate directory size and file count (frames if any)
+        let (mut file_count, mut total_size) = self.calculate_directory_stats(event_dir).await?;
+
+        // Add MP4 file size from root captures directory
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", dir_name));
+        if mp4_path.exists() {
+            if let Ok(mp4_metadata) = fs::metadata(&mp4_path).await {
+                file_count += 1;
+                total_size += mp4_metadata.len();
+                debug!(
+                    "Found MP4 file for event {}: {} bytes",
+                    dir_name,
+                    mp4_metadata.len()
+                );
+            }
+        }
+
+        // Add metadata file size from shared metadata directory
+        let metadata_file_path = capture_path
+            .join("metadata")
+            .join(format!("{}.json", dir_name));
+        if metadata_file_path.exists() {
+            if let Ok(metadata_file_metadata) = fs::metadata(&metadata_file_path).await {
+                file_count += 1;
+                total_size += metadata_file_metadata.len();
+                debug!(
+                    "Found metadata file for event {}: {} bytes",
+                    dir_name,
+                    metadata_file_metadata.len()
+                );
+            }
+        }
+
+        // Try to load metadata from shared metadata directory
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let metadata_path = capture_path
+            .join("metadata")
+            .join(format!("{}.json", dir_name));
+        let event_type = if metadata_path.exists() {
+            match self.load_event_type_from_metadata(&metadata_path).await {
+                Ok(event_type) => event_type,
+                Err(e) => {
+                    warn!(
+                        "Failed to load metadata for {}: {}, using default",
+                        dir_name, e
+                    );
+                    StoredEventType::MotionCapture {
+                        motion_area: 0.0,
+                        preroll_frames: 0,
+                        postroll_frames: 0,
+                    }
+                }
+            }
+        } else {
+            StoredEventType::MotionCapture {
+                motion_area: 0.0,
+                preroll_frames: 0,
+                postroll_frames: 0,
+            }
+        };
+
+        // Create event metadata
+        let event_metadata = StoredEventMetadata {
+            event_id: dir_name.to_string(),
+            timestamp,
+            directory_path: event_dir.to_path_buf(),
+            file_count,
+            total_size_bytes: total_size,
+            event_type,
+            created_at: timestamp,
+            last_accessed: SystemTime::now(),
+        };
+
+        // Register in memory
+        {
+            let mut registry = self.event_registry.write().await;
+            registry.events.insert(dir_name.to_string(), event_metadata);
+        }
+
+        Ok(())
+    }
+
+    /// Parse timestamp from directory name (YYYYMMDD_HHMMSS_mmm)
+    fn parse_timestamp_from_directory_name(&self, name: &str) -> Result<SystemTime> {
+        if name.len() != 19 {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Invalid timestamp format",
+            ));
+        }
+
+        let year: i32 = name[0..4]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid year in timestamp"))?;
+        let month: u32 = name[4..6]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid month in timestamp"))?;
+        let day: u32 = name[6..8]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid day in timestamp"))?;
+        let hour: u32 = name[9..11]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid hour in timestamp"))?;
+        let minute: u32 = name[11..13]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid minute in timestamp"))?;
+        let second: u32 = name[13..15]
+            .parse()
+            .map_err(|_| DoorcamError::component("event_storage", "Invalid second in timestamp"))?;
+        let millisecond: u32 = name[16..19].parse().map_err(|_| {
+            DoorcamError::component("event_storage", "Invalid millisecond in timestamp")
+        })?;
+
+        // Create DateTime and convert to SystemTime
+        let datetime = chrono::Utc
+            .with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .ok_or_else(|| DoorcamError::component("event_storage", "Invalid datetime"))?
+            + ChronoDuration::milliseconds(millisecond as i64);
+
+        let timestamp = UNIX_EPOCH
+            + Duration::from_secs(datetime.timestamp() as u64)
+            + Duration::from_nanos(datetime.timestamp_subsec_nanos() as u64);
+
+        Ok(timestamp)
+    }
+
+    /// Calculate directory statistics (file count and total size)
+    async fn calculate_directory_stats(&self, dir_path: &Path) -> Result<(u32, u64)> {
+        let mut file_count = 0u32;
+        let mut total_size = 0u64;
+
+        let mut entries = fs::read_dir(dir_path).await.map_err(|e| {
+            DoorcamError::component("event_storage", &format!("Failed to read directory: {}", e))
+        })?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            DoorcamError::component(
+                "event_storage",
+                &format!("Failed to read directory entry: {}", e),
+            )
+        })? {
+            let metadata = entry.metadata().await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to read file metadata: {}", e),
+                )
+            })?;
+
+            if metadata.is_file() {
+                file_count += 1;
+                total_size += metadata.len();
+            }
+        }
+
+        Ok((file_count, total_size))
+    }
+
+    /// Load event type from metadata file
+    async fn load_event_type_from_metadata(&self, metadata_path: &Path) -> Result<StoredEventType> {
+        let metadata_content = fs::read_to_string(metadata_path).await.map_err(|e| {
+            DoorcamError::component(
+                "event_storage",
+                &format!("Failed to read metadata file: {}", e),
+            )
+        })?;
+
+        let metadata: serde_json::Value = serde_json::from_str(&metadata_content).map_err(|e| {
+            DoorcamError::component(
+                "event_storage",
+                &format!("Failed to parse metadata JSON: {}", e),
+            )
+        })?;
+
+        // Extract motion area if available
+        let motion_area = metadata
+            .get("motion_area")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
+        let preroll_frames = metadata
+            .get("preroll_frame_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let postroll_frames = metadata
+            .get("postroll_frame_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        Ok(StoredEventType::MotionCapture {
+            motion_area,
+            preroll_frames,
+            postroll_frames,
+        })
+    }
+
+    /// Register a completed capture event
+    async fn register_completed_capture(&self, event_id: &str, file_count: u32) -> Result<()> {
+        debug!("Registering completed capture: {}", event_id);
+
+        let capture_path = PathBuf::from(&self.capture_config.path);
+
+        // Check if event directory exists (for image-based captures)
+        let event_dir = capture_path.join(event_id);
+
+        if event_dir.exists() && event_dir.is_dir() {
+            // Traditional mode: event directory exists with images
+            self.register_existing_event(&event_dir).await?;
+        } else {
+            // Video-only mode: no event directory, just register from metadata/MP4
+            // Parse timestamp from event_id
+            let timestamp = self.parse_timestamp_from_directory_name(event_id)?;
+
+            // Calculate file sizes
+            let mut file_count = 0u32;
+            let mut total_size = 0u64;
+
+            // Check for MP4 file
+            let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+            if mp4_path.exists() {
+                if let Ok(mp4_metadata) = fs::metadata(&mp4_path).await {
+                    file_count += 1;
+                    total_size += mp4_metadata.len();
+                    debug!(
+                        "Found MP4 file for event {}: {} bytes",
+                        event_id,
+                        mp4_metadata.len()
+                    );
+                }
+            }
+
+            // Check for metadata file
+            let metadata_path = capture_path
+                .join("metadata")
+                .join(format!("{}.json", event_id));
+            let event_type = if metadata_path.exists() {
+                if let Ok(metadata_file_metadata) = fs::metadata(&metadata_path).await {
+                    file_count += 1;
+                    total_size += metadata_file_metadata.len();
+                    debug!(
+                        "Found metadata file for event {}: {} bytes",
+                        event_id,
+                        metadata_file_metadata.len()
+                    );
+                }
+
+                match self.load_event_type_from_metadata(&metadata_path).await {
+                    Ok(event_type) => event_type,
+                    Err(e) => {
+                        warn!(
+                            "Failed to load metadata for {}: {}, using default",
+                            event_id, e
+                        );
+                        StoredEventType::MotionCapture {
+                            motion_area: 0.0,
+                            preroll_frames: 0,
+                            postroll_frames: 0,
+                        }
+                    }
+                }
+            } else {
+                StoredEventType::MotionCapture {
+                    motion_area: 0.0,
+                    preroll_frames: 0,
+                    postroll_frames: 0,
+                }
+            };
+
+            // Create event metadata
+            let event_metadata = StoredEventMetadata {
+                event_id: event_id.to_string(),
+                timestamp,
+                directory_path: event_dir, // Path even if it doesn't exist
+                file_count,
+                total_size_bytes: total_size,
+                event_type,
+                created_at: timestamp,
+                last_accessed: SystemTime::now(),
+            };
+
+            // Register in memory
+            {
+                let mut registry = self.event_registry.write().await;
+                registry.events.insert(event_id.to_string(), event_metadata);
+            }
+        }
+
+        info!(
+            "Registered completed capture: {} with {} files",
+            event_id, file_count
+        );
+        Ok(())
+    }
+}
+
+impl Clone for EventStorage {
+    fn clone(&self) -> Self {
+        Self {
+            capture_config: self.capture_config.clone(),
+            system_config: self.system_config.clone(),
+            event_bus: Arc::clone(&self.event_bus),
+            event_registry: Arc::clone(&self.event_registry),
+            cleanup_running: Arc::clone(&self.cleanup_running),
+        }
+    }
+}
+
+impl EventStorage {
+    /// Start the cleanup scheduler
+    async fn start_cleanup_scheduler(&self) -> Result<()> {
+        info!(
+            "Starting cleanup scheduler (retention: {} days)",
+            self.system_config.retention_days
+        );
+
+        let storage_system = Arc::new(self.clone());
+
+        // Main cleanup scheduler task
+        tokio::spawn(async move {
+            // Run cleanup every hour, with exponential backoff on failures
+            let base_interval = Duration::from_secs(3600); // 1 hour
+            let mut current_interval = base_interval;
+            let max_interval = Duration::from_secs(24 * 3600); // 24 hours max
+            let mut consecutive_failures = 0u32;
+
+            loop {
+                let mut interval = tokio::time::interval(current_interval);
+                interval.tick().await; // Skip first immediate tick
+                interval.tick().await; // Wait for the actual interval
+
+                match storage_system.run_cleanup().await {
+                    Ok(result) => {
+                        // Reset interval on success
+                        current_interval = base_interval;
+                        consecutive_failures = 0;
+
+                        info!(
+                            "Scheduled cleanup completed successfully: {} events deleted, {} bytes freed",
+                            result.events_deleted, result.bytes_freed
+                        );
+
+                        // Log warnings if cleanup had errors but didn't fail completely
+                        if !result.errors.is_empty() {
+                            warn!(
+                                "Cleanup completed with {} errors: {:?}",
+                                result.errors.len(),
+                                result.errors
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        consecutive_failures += 1;
+                        error!(
+                            "Cleanup operation failed (attempt {}): {}",
+                            consecutive_failures, e
+                        );
+
+                        // Exponential backoff: double the interval up to max_interval
+                        if consecutive_failures <= 5 {
+                            current_interval = std::cmp::min(current_interval * 2, max_interval);
+                            warn!(
+                                "Increasing cleanup interval to {:?} due to failures",
+                                current_interval
+                            );
+                        }
+
+                        // If we've had too many consecutive failures, log critical error
+                        if consecutive_failures >= 10 {
+                            error!("Cleanup has failed {} consecutive times - manual intervention may be required", consecutive_failures);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Initial cleanup task with delay
+        tokio::spawn({
+            let storage_system = Arc::new(self.clone());
+            async move {
+                // Wait for system to stabilize before first cleanup
+                tokio::time::sleep(Duration::from_secs(60)).await;
+
+                info!("Running initial cleanup");
+                match storage_system.run_cleanup().await {
+                    Ok(result) => {
+                        info!(
+                            "Initial cleanup completed: {} events deleted, {} bytes freed",
+                            result.events_deleted, result.bytes_freed
+                        );
+                    }
+                    Err(e) => {
+                        error!("Initial cleanup failed: {}", e);
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn start_rescan_scheduler(&self) -> Result<()> {
+        info!("Starting rescan scheduler for existing events");
+
+        let storage_system = Arc::new(self.clone());
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 1 hour
+            interval.tick().await; // Skip first immediate tick
+
+            loop {
+                interval.tick().await;
+
+                if let Err(e) = storage_system.scan_and_register_existing_events().await {
+                    warn!("Periodic rescan failed: {}", e);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Run cleanup operation to remove old events
+    pub async fn run_cleanup(&self) -> Result<CleanupResult> {
+        // Check if cleanup is already running
+        {
+            let cleanup_running = self.cleanup_running.read().await;
+            if *cleanup_running {
+                debug!("Cleanup already running, skipping");
+                return Ok(CleanupResult {
+                    events_deleted: 0,
+                    bytes_freed: 0,
+                    errors: vec!["Cleanup already running".to_string()],
+                    duration: Duration::ZERO,
+                });
+            }
+        }
+
+        // Set cleanup running flag
+        {
+            let mut cleanup_running = self.cleanup_running.write().await;
+            *cleanup_running = true;
+        }
+
+        let start_time = std::time::Instant::now();
+        info!("Starting cleanup operation");
+
+        let result = self.perform_cleanup().await;
+
+        // Clear cleanup running flag
+        {
+            let mut cleanup_running = self.cleanup_running.write().await;
+            *cleanup_running = false;
+        }
+
+        // Update last cleanup time
+        {
+            let mut registry = self.event_registry.write().await;
+            registry.last_cleanup = Some(SystemTime::now());
+        }
+
+        let duration = start_time.elapsed();
+
+        match &result {
+            Ok(cleanup_result) => {
+                info!(
+                    "Cleanup completed: {} events deleted, {} bytes freed, {} errors, took {:?}",
+                    cleanup_result.events_deleted,
+                    cleanup_result.bytes_freed,
+                    cleanup_result.errors.len(),
+                    duration
+                );
+            }
+            Err(e) => {
+                error!("Cleanup failed: {}", e);
+            }
+        }
+
+        result
+    }
+
+    /// Perform the actual cleanup operation
+    async fn perform_cleanup(&self) -> Result<CleanupResult> {
+        let retention_duration =
+            Duration::from_secs(self.system_config.retention_days as u64 * 24 * 3600);
+        let cutoff_time = SystemTime::now() - retention_duration;
+
+        debug!("Cleanup cutoff time: {:?}", cutoff_time);
+
+        let mut events_to_delete = Vec::new();
+
+        // Find events older than retention period
+        {
+            let registry = self.event_registry.read().await;
+            for (event_id, metadata) in &registry.events {
+                if metadata.timestamp < cutoff_time {
+                    events_to_delete.push((event_id.clone(), metadata.clone()));
+                }
+            }
+        }
+
+        info!("Found {} events to delete", events_to_delete.len());
+
+        let mut events_deleted = 0;
+        let mut bytes_freed = 0u64;
+        let mut errors = Vec::new();
+
+        // Delete old events
+        for (event_id, metadata) in events_to_delete {
+            match self.delete_event(&event_id, &metadata).await {
+                Ok(deleted_bytes) => {
+                    events_deleted += 1;
+                    bytes_freed += deleted_bytes;
+                    debug!("Deleted event: {} ({} bytes)", event_id, deleted_bytes);
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to delete event {}: {}", event_id, e);
+                    error!("{}", error_msg);
+                    errors.push(error_msg);
+                }
+            }
+        }
+
+        Ok(CleanupResult {
+            events_deleted,
+            bytes_freed,
+            errors,
+            duration: Duration::ZERO, // Will be set by caller
+        })
+    }
+
+    /// Delete a specific event and its files
+    async fn delete_event(&self, event_id: &str, metadata: &StoredEventMetadata) -> Result<u64> {
+        debug!(
+            "Deleting event: {} at {}",
+            event_id,
+            metadata.directory_path.display()
+        );
+
+        // Enhanced timestamp validation with multiple safety checks
+        let retention_duration =
+            Duration::from_secs(self.system_config.retention_days as u64 * 24 * 3600);
+        let cutoff_time = SystemTime::now() - retention_duration;
+
+        if metadata.timestamp >= cutoff_time {
+            return Err(DoorcamError::component(
+                "event_storage",
+                &format!(
+                    "Refusing to delete recent event {} (timestamp validation failed)",
+                    event_id
+                ),
+            ));
+        }
+
+        // Additional safety check: ensure event is at least 1 hour old regardless of retention policy
+        let minimum_age = Duration::from_secs(3600); // 1 hour
+        let minimum_cutoff = SystemTime::now() - minimum_age;
+        if metadata.timestamp >= minimum_cutoff {
+            return Err(DoorcamError::component(
+                "event_storage",
+                &format!(
+                    "Refusing to delete very recent event {} (minimum age safety check)",
+                    event_id
+                ),
+            ));
+        }
+
+        // Validate deletion safety before proceeding
+        self.validate_deletion_safety(&metadata.directory_path)?;
+
+        // Validate directory path is within capture path (if directory exists)
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        if metadata.directory_path.exists() {
+            if !metadata.directory_path.starts_with(&capture_path) {
+                return Err(DoorcamError::component(
+                    "event_storage",
+                    &format!(
+                        "Event directory {} is outside capture path",
+                        metadata.directory_path.display()
+                    ),
+                ));
+            }
+        }
+
+        // Calculate actual size before deletion (directory + MP4 + metadata + WAL)
+        let dir_size = if metadata.directory_path.exists() {
+            let (_, size) = self
+                .calculate_directory_stats(&metadata.directory_path)
+                .await?;
+            size
+        } else {
+            0
+        };
+
+        // Add MP4 file size
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+        let mp4_size = if mp4_path.exists() {
+            fs::metadata(&mp4_path).await.map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Add metadata file size
+        let metadata_path = capture_path
+            .join("metadata")
+            .join(format!("{}.json", event_id));
+        let metadata_size = if metadata_path.exists() {
+            fs::metadata(&metadata_path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Add WAL file size
+        let wal_path = capture_path.join("wal").join(format!("{}.wal", event_id));
+        let wal_size = if wal_path.exists() {
+            fs::metadata(&wal_path).await.map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let actual_size = dir_size + mp4_size + metadata_size + wal_size;
+
+        // Remove MP4 file from root captures directory
+        let capture_path = PathBuf::from(&self.capture_config.path);
+        let mp4_path = capture_path.join(format!("{}.mp4", event_id));
+        if mp4_path.exists() {
+            fs::remove_file(&mp4_path).await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to delete MP4 file {}: {}", mp4_path.display(), e),
+                )
+            })?;
+            debug!("Deleted MP4 file: {}", mp4_path.display());
+        }
+
+        // Remove WAL file from capture WAL directory
+        let wal_path = capture_path.join("wal").join(format!("{}.wal", event_id));
+        if wal_path.exists() {
+            fs::remove_file(&wal_path).await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!("Failed to delete WAL file {}: {}", wal_path.display(), e),
+                )
+            })?;
+            debug!("Deleted WAL file: {}", wal_path.display());
+        }
+
+        // Remove metadata file from shared metadata directory
+        let metadata_path = capture_path
+            .join("metadata")
+            .join(format!("{}.json", event_id));
+        if metadata_path.exists() {
+            fs::remove_file(&metadata_path).await.map_err(|e| {
+                DoorcamError::component(
+                    "event_storage",
+                    &format!(
+                        "Failed to delete metadata file {}: {}",
+                        metadata_path.display(),
+                        e
+                    ),
+                )
+            })?;
+            debug!("Deleted metadata file: {}", metadata_path.display());
+        }
+
+        // Remove event directory if it exists (for images)
+        if metadata.directory_path.exists() {
+            fs::remove_dir_all(&metadata.directory_path)
+                .await
+                .map_err(|e| {
+                    DoorcamError::component(
+                        "event_storage",
+                        &format!(
+                            "Failed to delete directory {}: {}",
+                            metadata.directory_path.display(),
+                            e
+                        ),
+                    )
+                })?;
+            debug!(
+                "Deleted event directory: {}",
+                metadata.directory_path.display()
+            );
+        }
+
+        // Remove from registry
+        {
+            let mut registry = self.event_registry.write().await;
+            registry.events.remove(event_id);
+        }
+
+        info!("Deleted event: {} ({} bytes freed)", event_id, actual_size);
+        Ok(actual_size)
+    }
+
+    /// Get storage statistics
+    pub async fn get_storage_stats(&self) -> StorageStats {
+        let registry = self.event_registry.read().await;
+
+        let mut total_size_bytes = 0u64;
+        let mut oldest_event = None;
+        let mut newest_event = None;
+        let mut events_by_type = HashMap::new();
+
+        for metadata in registry.events.values() {
+            total_size_bytes += metadata.total_size_bytes;
+
+            // Track oldest and newest events
+            if oldest_event.is_none() || metadata.timestamp < oldest_event.unwrap() {
+                oldest_event = Some(metadata.timestamp);
+            }
+            if newest_event.is_none() || metadata.timestamp > newest_event.unwrap() {
+                newest_event = Some(metadata.timestamp);
+            }
+
+            // Count events by type
+            let type_name = match &metadata.event_type {
+                StoredEventType::MotionCapture { .. } => "motion_capture",
+                StoredEventType::ManualCapture { .. } => "manual_capture",
+            };
+            *events_by_type.entry(type_name.to_string()).or_insert(0) += 1;
+        }
+
+        StorageStats {
+            total_events: registry.events.len(),
+            total_size_bytes,
+            oldest_event,
+            newest_event,
+            events_by_type,
+            last_cleanup: registry.last_cleanup,
+        }
+    }
+
+    /// Get events within a time range
+    pub async fn get_events_in_range(
+        &self,
+        start: SystemTime,
+        end: SystemTime,
+    ) -> Vec<StoredEventMetadata> {
+        let registry = self.event_registry.read().await;
+
+        registry
+            .events
+            .values()
+            .filter(|metadata| metadata.timestamp >= start && metadata.timestamp <= end)
+            .cloned()
+            .collect()
+    }
+
+    /// Get recent events (last N events)
+    pub async fn get_recent_events(&self, count: usize) -> Vec<StoredEventMetadata> {
+        let registry = self.event_registry.read().await;
+
+        let mut events: Vec<_> = registry.events.values().cloned().collect();
+        events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Sort by timestamp descending
+        events.truncate(count);
+        events
+    }
+
+    /// Get event by ID
+    pub async fn get_event(&self, event_id: &str) -> Option<StoredEventMetadata> {
+        let registry = self.event_registry.read().await;
+        registry.events.get(event_id).cloned()
+    }
+
+    /// Update last accessed time for an event
+    pub async fn update_event_access(&self, event_id: &str) -> Result<()> {
+        let mut registry = self.event_registry.write().await;
+
+        if let Some(metadata) = registry.events.get_mut(event_id) {
+            metadata.last_accessed = SystemTime::now();
+            debug!("Updated access time for event: {}", event_id);
+        }
+
+        Ok(())
+    }
+
+    /// Force cleanup of specific event (for testing or manual cleanup)
+    pub async fn delete_event_by_id(&self, event_id: &str) -> Result<u64> {
+        let metadata = {
+            let registry = self.event_registry.read().await;
+            registry.events.get(event_id).cloned()
+        };
+
+        if let Some(metadata) = metadata {
+            self.delete_event(event_id, &metadata).await
+        } else {
+            Err(DoorcamError::component(
+                "event_storage",
+                &format!("Event not found: {}", event_id),
+            ))
+        }
+    }
+
+    /// Stop the event storage system
+    pub async fn stop(&self) -> Result<()> {
+        info!("Stopping event storage system");
+
+        // Wait for any running cleanup to complete with timeout
+        let timeout_duration = Duration::from_secs(30);
+        let start_time = std::time::Instant::now();
+
+        loop {
+            let cleanup_running = {
+                let guard = self.cleanup_running.read().await;
+                *guard
+            };
+
+            if !cleanup_running {
+                break;
+            }
+
+            if start_time.elapsed() > timeout_duration {
+                warn!("Timeout waiting for cleanup to complete, forcing shutdown");
+                break;
+            }
+
+            debug!("Waiting for cleanup to complete...");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        info!("Event storage system stopped");
+        Ok(())
+    }
+
+    /// Run cleanup with custom retention period (for testing or manual operations)
+    pub async fn run_cleanup_with_retention(&self, retention_days: u32) -> Result<CleanupResult> {
+        // Check if cleanup is already running
+        {
+            let cleanup_running = self.cleanup_running.read().await;
+            if *cleanup_running {
+                debug!("Cleanup already running, skipping custom cleanup");
+                return Ok(CleanupResult {
+                    events_deleted: 0,
+                    bytes_freed: 0,
+                    errors: vec!["Cleanup already running".to_string()],
+                    duration: Duration::ZERO,
+                });
+            }
+        }
+
+        // Set cleanup running flag
+        {
+            let mut cleanup_running = self.cleanup_running.write().await;
+            *cleanup_running = true;
+        }
+
+        let start_time = std::time::Instant::now();
+        info!(
+            "Starting custom cleanup with {} day retention",
+            retention_days
+        );
+
+        let result = self.perform_cleanup_with_retention(retention_days).await;
+
+        // Clear cleanup running flag
+        {
+            let mut cleanup_running = self.cleanup_running.write().await;
+            *cleanup_running = false;
+        }
+
+        let duration = start_time.elapsed();
+
+        match &result {
+            Ok(cleanup_result) => {
+                info!(
+                    "Custom cleanup completed: {} events deleted, {} bytes freed, {} errors, took {:?}",
+                    cleanup_result.events_deleted,
+                    cleanup_result.bytes_freed,
+                    cleanup_result.errors.len(),
+                    duration
+                );
+            }
+            Err(e) => {
+                error!("Custom cleanup failed: {}", e);
+            }
+        }
+
+        result
+    }
+
+    /// Perform cleanup with custom retention period
+    async fn perform_cleanup_with_retention(&self, retention_days: u32) -> Result<CleanupResult> {
+        let retention_duration = Duration::from_secs(retention_days as u64 * 24 * 3600);
+        let cutoff_time = SystemTime::now() - retention_duration;
+
+        debug!(
+            "Custom cleanup cutoff time: {:?} (retention: {} days)",
+            cutoff_time, retention_days
+        );
+
+        let mut events_to_delete = Vec::new();
+
+        // Find events older than retention period
+        {
+            let registry = self.event_registry.read().await;
+            for (event_id, metadata) in &registry.events {
+                if metadata.timestamp < cutoff_time {
+                    events_to_delete.push((event_id.clone(), metadata.clone()));
+                }
+            }
+        }
+
+        info!(
+            "Found {} events to delete with {} day retention",
+            events_to_delete.len(),
+            retention_days
+        );
+
+        let mut events_deleted = 0;
+        let mut bytes_freed = 0u64;
+        let mut errors = Vec::new();
+
+        // Delete old events
+        for (event_id, metadata) in events_to_delete {
+            match self.delete_event(&event_id, &metadata).await {
+                Ok(deleted_bytes) => {
+                    events_deleted += 1;
+                    bytes_freed += deleted_bytes;
+                    debug!("Deleted event: {} ({} bytes)", event_id, deleted_bytes);
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to delete event {}: {}", event_id, e);
+                    error!("{}", error_msg);
+                    errors.push(error_msg);
+                }
+            }
+        }
+
+        Ok(CleanupResult {
+            events_deleted,
+            bytes_freed,
+            errors,
+            duration: Duration::ZERO, // Will be set by caller
+        })
+    }
+
+    /// Get cleanup statistics and status
+    pub async fn get_cleanup_status(&self) -> CleanupStatus {
+        let registry = self.event_registry.read().await;
+        let cleanup_running = {
+            let guard = self.cleanup_running.read().await;
+            *guard
+        };
+
+        let retention_duration =
+            Duration::from_secs(self.system_config.retention_days as u64 * 24 * 3600);
+        let cutoff_time = SystemTime::now() - retention_duration;
+
+        let mut events_eligible_for_cleanup = 0;
+        let mut bytes_eligible_for_cleanup = 0u64;
+
+        for metadata in registry.events.values() {
+            if metadata.timestamp < cutoff_time {
+                events_eligible_for_cleanup += 1;
+                bytes_eligible_for_cleanup += metadata.total_size_bytes;
+            }
+        }
+
+        CleanupStatus {
+            is_running: cleanup_running,
+            retention_days: self.system_config.retention_days,
+            last_cleanup: registry.last_cleanup,
+            events_eligible_for_cleanup,
+            bytes_eligible_for_cleanup,
+            total_events: registry.events.len(),
+        }
+    }
+
+    /// Create a timestamped directory name for a new event
+    pub fn create_event_directory_name(timestamp: SystemTime) -> String {
+        let datetime: DateTime<Utc> = timestamp.into();
+        // Format: YYYYMMDD_HHMMSS_mmm (19 characters total)
+        datetime.format("%Y%m%d_%H%M%S_%3f").to_string()
+    }
+
+    /// Validate that a directory is safe to delete (additional safety check)
+    /// Note: Directory might not exist if only video files are saved
+    fn validate_deletion_safety(&self, path: &Path) -> Result<()> {
+        let capture_path = PathBuf::from(&self.capture_config.path);
+
+        // If directory doesn't exist, skip validation (it's okay - might be video-only mode)
+        if !path.exists() {
+            return Ok(());
+        }
+
+        // Must be within capture directory
+        if !path.starts_with(&capture_path) {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Path is outside capture directory",
+            ));
+        }
+
+        // Must be a directory
+        if !path.is_dir() {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Path is not a directory",
+            ));
+        }
+
+        // Directory name must match timestamp pattern
+        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+            if !self.is_valid_event_directory_name(dir_name) {
+                return Err(DoorcamError::component(
+                    "event_storage",
+                    "Directory name doesn't match expected pattern",
+                ));
+            }
+        } else {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Invalid directory name",
+            ));
+        }
+
+        // Additional safety checks
+
+        // Ensure path depth is reasonable (not too deep or too shallow)
+        let relative_path = path
+            .strip_prefix(&capture_path)
+            .map_err(|_| DoorcamError::component("event_storage", "Failed to get relative path"))?;
+
+        if relative_path.components().count() != 1 {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Event directory must be directly under capture path",
+            ));
+        }
+
+        // Check that directory is not the capture root itself
+        if path == capture_path {
+            return Err(DoorcamError::component(
+                "event_storage",
+                "Cannot delete capture root directory",
+            ));
+        }
+
+        // Verify directory contains expected event files (basic sanity check)
+        let has_event_files = std::fs::read_dir(path)
+            .map_err(|e| {
+                DoorcamError::component("event_storage", &format!("Cannot read directory: {}", e))
+            })?
+            .any(|entry| {
+                if let Ok(entry) = entry {
+                    if let Some(name) = entry.file_name().to_str() {
+                        return name.ends_with(".jpg") || name.ends_with(".jpeg");
+                    }
+                }
+                false
+            });
+
+        if !has_event_files {
+            debug!(
+                "Directory {} does not contain image files (might be video-only mode)",
+                path.display()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Perform dry run cleanup to see what would be deleted without actually deleting
+    pub async fn dry_run_cleanup(&self) -> Result<CleanupResult> {
+        let retention_duration =
+            Duration::from_secs(self.system_config.retention_days as u64 * 24 * 3600);
+        let cutoff_time = SystemTime::now() - retention_duration;
+
+        debug!("Dry run cleanup cutoff time: {:?}", cutoff_time);
+
+        let mut events_to_delete = Vec::new();
+        let mut total_bytes = 0u64;
+
+        // Find events older than retention period
+        {
+            let registry = self.event_registry.read().await;
+            for (event_id, metadata) in &registry.events {
+                if metadata.timestamp < cutoff_time {
+                    events_to_delete.push(event_id.clone());
+                    total_bytes += metadata.total_size_bytes;
+                }
+            }
+        }
+
+        info!(
+            "Dry run: would delete {} events ({} bytes)",
+            events_to_delete.len(),
+            total_bytes
+        );
+
+        Ok(CleanupResult {
+            events_deleted: events_to_delete.len(),
+            bytes_freed: total_bytes,
+            errors: Vec::new(),
+            duration: Duration::ZERO,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::{CaptureConfig, SystemConfig},
+        events::EventBus,
+    };
+    use tempfile::TempDir;
+
+    use chrono::Datelike;
+
+    fn create_test_configs() -> (CaptureConfig, SystemConfig) {
+        let temp_dir = TempDir::new().unwrap();
+        let capture_config = CaptureConfig {
+            path: temp_dir.path().to_string_lossy().to_string(),
+            timestamp_overlay: true,
+            timestamp_font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            timestamp_font_size: 24.0,
+            timestamp_timezone: "UTC".to_string(),
+            video_encoding: false,
+            keep_images: true,
+            save_metadata: true,
+            rotation: None,
+        };
+
+        let system_config = SystemConfig {
+            trim_old: true,
+            retention_days: 7,
+        };
+
+        (capture_config, system_config)
+    }
+
+    #[tokio::test]
+    async fn test_event_storage_creation() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        let stats = storage.get_storage_stats().await;
+        assert_eq!(stats.total_events, 0);
+    }
+
+    #[tokio::test]
+    async fn test_directory_name_validation() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        assert!(storage.is_valid_event_directory_name("20231019_143022_123"));
+        assert!(!storage.is_valid_event_directory_name("invalid_name"));
+        assert!(!storage.is_valid_event_directory_name("20231019_143022")); // Too short
+        assert!(!storage.is_valid_event_directory_name("20231019-143022-123")); // Wrong separators
+    }
+
+    #[tokio::test]
+    async fn test_timestamp_parsing() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        let timestamp = storage
+            .parse_timestamp_from_directory_name("20231019_143022_123")
+            .unwrap();
+
+        // Verify the timestamp is reasonable (should be in 2023)
+        let datetime: DateTime<Utc> = timestamp.into();
+        assert_eq!(datetime.year(), 2023);
+        assert_eq!(datetime.month(), 10);
+        assert_eq!(datetime.day(), 19);
+    }
+
+    #[tokio::test]
+    async fn test_event_directory_name_creation() {
+        let now = SystemTime::now();
+        let dir_name = EventStorage::create_event_directory_name(now);
+
+        // Should be 19 characters long
+        assert_eq!(dir_name.len(), 19);
+
+        // Should contain underscores at positions 8 and 15
+        assert_eq!(dir_name.chars().nth(8).unwrap(), '_');
+        assert_eq!(dir_name.chars().nth(15).unwrap(), '_');
+    }
+
+    #[tokio::test]
+    async fn test_storage_stats() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        // Initially empty
+        let stats = storage.get_storage_stats().await;
+        assert_eq!(stats.total_events, 0);
+        assert_eq!(stats.total_size_bytes, 0);
+        assert!(stats.oldest_event.is_none());
+        assert!(stats.newest_event.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_status() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        let status = storage.get_cleanup_status().await;
+        assert!(!status.is_running);
+        assert_eq!(status.retention_days, 7);
+        assert_eq!(status.events_eligible_for_cleanup, 0);
+        assert_eq!(status.bytes_eligible_for_cleanup, 0);
+        assert_eq!(status.total_events, 0);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_cleanup() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        let result = storage.dry_run_cleanup().await.unwrap();
+        assert_eq!(result.events_deleted, 0);
+        assert_eq!(result.bytes_freed, 0);
+        assert!(result.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_validation_safety() {
+        let (capture_config, system_config) = create_test_configs();
+        let event_bus = Arc::new(EventBus::new());
+        let capture_path = PathBuf::from(&capture_config.path);
+
+        // Create the capture directory so it exists for validation
+        std::fs::create_dir_all(&capture_path).unwrap();
+
+        let storage = EventStorage::new(capture_config, system_config, event_bus);
+
+        // Test validation of capture root (should fail - cannot delete root)
+        let result = storage.validate_deletion_safety(&capture_path);
+        assert!(
+            result.is_err(),
+            "Should not allow deleting capture root directory"
+        );
+
+        // Test validation of path outside capture directory (should fail)
+        // Create a directory outside the capture path
+        let outside_path = PathBuf::from("/tmp/test_outside_capture_dir");
+        std::fs::create_dir_all(&outside_path).unwrap();
+        let result = storage.validate_deletion_safety(&outside_path);
+        assert!(
+            result.is_err(),
+            "Should not allow deleting paths outside capture directory"
+        );
+        // Clean up
+        let _ = std::fs::remove_dir(&outside_path);
+    }
+}

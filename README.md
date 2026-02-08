@@ -1,69 +1,169 @@
-# doorcam
-Raspberry Pi Peephole Camera
+# Doorcam
 
-# Requirements
-This application requires OpenCV and the optional python package(s) it installs. You'll need to build and/or install that before you proceed with installing doorcam.
+Rust-based door camera system with motion detection, capture, live streaming, and display/touch integration. This project is designed for a Raspberry Pi 4 running Raspbian OS with a HyperPixel 4.0 screen.
 
-## Installation
-1. Install the requirements listed above
-2. Clone the repo
-   ```
-   git clone https://github.com/retrontology/doorcam
-   ```
-3. Install the python requirements
-   ```
-   cd doorcam
-   python3 -m pip install -r requirements.txt
-   ```
+## Features
+- Motion detection on a rolling ring buffer (pre/post-roll recording).
+- MJPEG streaming server with a simple HTML viewer.
+- Motion-triggered capture to WAL, optional JPEG frames, MP4 encoding, and metadata.
+- Display output for HyperPixel-style framebuffers with backlight control.
+- Touch input to wake/keep the display active.
+- Event bus + orchestrator to coordinate components.
+- CLI modes for config printing, validation, and dry runs.
 
-## Config
-- <b>analyzer</b>:
-  - <b>contour_minimum_area</b>: Minimum contour area of difference between frames of the analyzer to trigger a detection event.
-  - <b>delta_threshold</b>: Threshold setting passed to threshold command for detecting difference between frames of tha analyzer
-  - <b>max_fps</b>: Maximum desired fps. Minium fps relies on speed of single thread
-  - <b>undistort</b>: Whether you want to undistort the camera image before analayzing it or not.
-  - <b>undistort_balance</b>: The balance used for the undistort function if enabled
-- <b>camera</b>:
-  - <b>D</b>: Array of distortion coeffecients for applying fisheye undistortion. Obtained via the `calibrate.py` program.
-  - <b>K</b>: Camera intrinsic matrix. Obtained via the `calibrate.py` program.
-  - <b>format</b>: A four letter string used for setting the format of the capture device.
-  - <b>index</b>: Index of the video device to be used for capture. i.e. if you want to use /dev/video2, your index would be 2
-  - <b>max_fps</b>: Desired capture fps for the video device
-  - <b>resolution</b>: Desired capture resolution for the video device
-  - <b>rotation</b>: Rotation desired for frames retrieved from the video device. Is very intensive and can reduce fps if not None/null
-- <b>capture</b>:
-  - <b>enable</b>: Whether or not to enable saving events to disk
-  - <b>keep_images</b> Whether or not to keep saved images
-  - <b>path</b>: Where the images will be saved
-  - <b>postroll</b>: Amount of time in seconds to capture after the last frame where motion is detected
-  - <b>preroll</b>: Amount of time in seconds to capture before the first frame where motion is detected
-  - <b>rotation</b>: The desired rotation to apply to the frames during post-processing.
-  - <b>timestamp</b>: Whether or not to add timestamps to the saved images
-  - <b>trim_old</b>: Whether or not to trim/delete old events.
-  - <b>trim_limit</b>: Amount of days of events you want to keep. All videos older than this window are trimmed/deleted if trim_old is `true`.
-  - <b>video_encode</b>: Whether or not to encode the saved images to a video file
-- <b>screen</b>:
-  - <b>activation_period</b>: How long in seconds you want the screen to activate for when either motion is detected or you touch the screen.
-  - <b>backlight_device</b>: Path to the backlight device
-  - <b>color_conv</b>: Color conversion to use for rendering to the framebuffer. Refer to https://docs.opencv.org/4.5.3/d8/d01/group__imgproc__color__conversions.html
-  - <b>dtype</b>: The dtype to use for determining the width of each framebuffer pixel. Refer to https://numpy.org/doc/stable/reference/arrays.scalars.html#sized-aliases
-  - <b>framebuffer_device</b>: Path to the framebuffer device to use for display.
-  - <b>resolution</b>: The resolution of the framebuffer for resizing the frame for display.
-  - <b>rotation</b>: The desired rotation to apply to the frame retrieved from the camera. Is significantly faster in this application as the image used is 1/4 the size of the original
-  - <b>touch_device</b>: Path to the touchscreen device
-  - <b>undistort</b>: Whether to undistort the frame on the screen
-  - <b>undistort_balance</b>: The balance to pass to the undistortion function
-- <b>stream</b>:
-  - <b>ip</b>: The IP address of the desired network device to use for the MJPG server
-  - <b>port</b>: The port to listen on for the MJPG server
+## Quick start
+1. Complete the Raspberry Pi setup steps below.
+2. Review or copy `doorcam.toml`.
+3. Build and run:
 
-## Usage
 ```
-usage: run.py [-h] [-c config.yaml] [-d] [-f]
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -c config.yaml, --config config.yaml
-  -d, --debug
-  -f, --fps
+cargo build --release
+./target/release/doorcam --config doorcam.toml
 ```
+
+Common CLI options:
+```
+./target/release/doorcam --print-config
+./target/release/doorcam --validate-config --config doorcam.toml
+./target/release/doorcam --debug --enable-keyboard
+```
+
+Keyboard debug mode (optional):
+- `SPACE` triggers a motion event
+- `Q` or `ESC` shuts down
+
+## Streaming
+The MJPEG server exposes:
+- Viewer: `http://<ip>:8080/`
+- Stream: `http://<ip>:8080/stream.mjpg`
+- Health: `http://<ip>:8080/health`
+
+The bind address and port are controlled by `stream.ip` and `stream.port`.
+
+## Capture output
+By default, captures go to `./captures`.
+
+Typical outputs:
+- WAL files: `./captures/wal/<event_id>.wal`
+- MP4 files: `./captures/<event_id>.mp4` (when `capture.video_encoding = true`)
+- JPEG frames: `./captures/<event_id>/frames/*.jpg` (when `capture.keep_images = true`)
+- Metadata: `./captures/metadata/<event_id>.json` (when `capture.save_metadata = true`)
+
+## WAL tool
+`waltool` converts WAL files into images/video/metadata.
+
+```
+cargo run --bin waltool -- --input ./captures/wal
+cargo run --bin waltool -- --input ./captures/wal/20240101_120000_123.wal --video --images --metadata
+```
+
+## Configuration
+Configuration is loaded from `doorcam.toml` (optional) and environment variables with the `DOORCAM_` prefix.
+
+Examples:
+```
+DOORCAM_CAMERA_INDEX=1
+DOORCAM_CAMERA_RESOLUTION="[1280, 720]"
+DOORCAM_STREAM_PORT=9090
+DOORCAM_CAPTURE_PATH="/var/lib/doorcam/captures"
+DOORCAM_EVENT_PREROLL_SECONDS=3
+DOORCAM_EVENT_POSTROLL_SECONDS=8
+```
+
+Key sections:
+- `camera`: device index, resolution, fps, format.
+- `analyzer`: motion detection fps and thresholds.
+- `event`: pre/post-roll timing.
+- `capture`: output path, timestamp overlay, encoding options.
+- `stream`: bind ip/port and optional rotation.
+- `display`: framebuffer/backlight/touch devices and activation period.
+- `system`: retention and cleanup options.
+
+Run `--print-config` for the built-in defaults.
+
+## Systemd service
+An example service file is provided at `systemd/doorcam.service`.
+
+Typical setup:
+1. Install the binary (example):
+```
+sudo install -m 755 ./target/release/doorcam /usr/local/bin/doorcam
+```
+2. Create config + data directories:
+```
+sudo install -d -m 755 /etc/doorcam /var/lib/doorcam
+sudo cp doorcam.toml /etc/doorcam/doorcam.toml
+```
+3. Create a service user and grant device access:
+```
+sudo useradd --system --home /var/lib/doorcam --shell /usr/sbin/nologin doorcam
+sudo usermod -aG video,input doorcam
+```
+4. Install the service file and start it:
+```
+sudo cp systemd/doorcam.service /etc/systemd/system/doorcam.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now doorcam.service
+```
+
+Edit the service file if your binary or config paths differ.
+
+## Raspberry Pi 4 setup (Raspbian + HyperPixel 4.0)
+1. Start from Raspberry Pi OS (Bullseye or newer) and run system updates:
+```
+sudo apt update
+sudo apt upgrade -y
+```
+2. Install build and runtime dependencies:
+```
+sudo apt install -y \
+  build-essential pkg-config git \
+  gstreamer1.0-tools gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  ffmpeg v4l-utils
+```
+3. Enable the HyperPixel 4.0 overlay in `/boot/config.txt`:
+```
+sudo sed -i '$a dtoverlay=hyperpixel4' /boot/config.txt
+```
+Reboot after adding the overlay:
+```
+sudo reboot
+```
+4. Verify devices:
+```
+ls /dev/video0
+ls /dev/fb0
+ls /dev/input/event0
+```
+Note: the camera should appear as a USB V4L2 device (e.g., `/dev/video0`).
+5. Adjust `doorcam.toml` for device paths if they differ:
+- `display.framebuffer_device` (default `/dev/fb0`)
+- `display.backlight_device`
+- `display.touch_device`
+6. Build and run Doorcam (see Quick start).
+
+## System requirements
+Target platform:
+- Raspberry Pi 4 running Raspbian OS.
+- HyperPixel 4.0 display (framebuffer + touch input).
+- USB V4L2 camera device (e.g., `/dev/video0`).
+- GStreamer and FFmpeg with `h264_v4l2m2m` for hardware-accelerated encoding.
+
+## Development
+```
+cargo test
+```
+
+Logging:
+```
+RUST_LOG=doorcam=debug ./target/release/doorcam --config doorcam.toml
+```
+
+## License
+MIT. See `LICENSE`.
+
+## Disclaimer
+This project was created with the assistance of agentic AI.

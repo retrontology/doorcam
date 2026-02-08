@@ -1,0 +1,20 @@
+[Unit]
+Description=Doorcam camera service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=doorcam
+Group=doorcam
+SupplementaryGroups=video input
+WorkingDirectory=/var/lib/doorcam
+Environment=RUST_LOG=doorcam=info
+ExecStart=/usr/local/bin/doorcam --config /etc/doorcam/doorcam.toml
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

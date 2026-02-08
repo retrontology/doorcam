@@ -1,0 +1,109 @@
+# Doorcam Configuration File
+# This file contains all configuration options for the Rust-based doorcam system.
+# All values shown are defaults and can be overridden by environment variables
+# using the DOORCAM_ prefix (e.g., DOORCAM_CAMERA_INDEX=1)
+
+[camera]
+# Camera device index (0 = /dev/video0, 1 = /dev/video1, etc.)
+index = 0
+
+# Camera resolution as [width, height]
+resolution = [640, 480]
+
+# Maximum frames per second for camera capture
+fps = 30
+
+# Video format - supported: "MJPG", "YUYV", "RGB24"
+format = "MJPG"
+
+[analyzer]
+# Motion analysis FPS (1-5 recommended)
+fps = 2
+
+# Delta threshold (higher = less sensitive)
+delta_threshold = 20
+
+# Minimum contour area at analysis resolution (camera resolution / jpeg_decode_scale)
+contour_minimum_area = 75.0
+
+# Reciprocal decode scale (4 = quarter width/height, aspect preserved)
+jpeg_decode_scale = 4
+
+[event]
+# Shared event timing (applies to capture and display behaviors)
+# Preroll duration in seconds (how much video before motion to save/show)
+preroll_seconds = 5
+
+# Postroll duration in seconds (how long to record/display after motion stops)
+postroll_seconds = 10
+
+[capture]
+# Base directory for storing captured events
+path = "./captures"
+
+# Add timestamp overlay to captured images
+timestamp_overlay = true
+
+# Path to TrueType font file for timestamp overlay
+timestamp_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+# Font size for timestamp overlay (in points)
+timestamp_font_size = 24.0
+
+# Timezone for timestamp overlay (IANA name, e.g., "America/New_York")
+timestamp_timezone = "UTC"
+
+# Enable video encoding
+video_encoding = true
+
+# Keep individual JPEG images (in addition to video if enabled)
+keep_images = false
+
+# Save metadata JSON files for each capture event (stored in captures/metadata/)
+# Event subdirectories are only created when keep_images is true
+save_metadata = false
+
+# Optional capture rotation - uncomment to enable
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+[stream]
+# IP address to bind MJPEG stream server (0.0.0.0 = all interfaces)
+ip = "0.0.0.0"
+
+# Port for MJPEG stream server
+port = 8080
+
+# Optional stream rotation for the HTML viewer (applies CSS transform)
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+[display]
+# Framebuffer device for HyperPixel display
+framebuffer_device = "/dev/fb0"
+
+# Backlight control device
+backlight_device = "/sys/class/backlight/rpi_backlight/brightness"
+
+# Touch input device
+touch_device = "/dev/input/event0"
+
+# How long to keep display active after motion/touch (seconds)
+activation_period_seconds = 30
+
+# Optional display rotation - uncomment to enable
+# rotation = "Rotate90"  # Options: "Rotate90", "Rotate180", "Rotate270"
+
+[system]
+# Enable automatic cleanup of old capture events
+trim_old = true
+
+# How many days to keep capture events (if trim_old is enabled)
+retention_days = 7
+
+# Example environment variable overrides:
+# DOORCAM_CAMERA_INDEX=1
+# DOORCAM_CAMERA_RESOLUTION="[1280, 720]"
+# DOORCAM_STREAM_PORT=9090
+# DOORCAM_CAPTURE_PATH="/var/lib/doorcam/captures"
+# DOORCAM_SYSTEM_TRIM_OLD=false
+# DOORCAM_EVENT_PREROLL_SECONDS=3
+# DOORCAM_EVENT_POSTROLL_SECONDS=8
